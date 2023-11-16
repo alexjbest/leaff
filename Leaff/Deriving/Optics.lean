@@ -217,7 +217,7 @@ private def mkModifyM (c : CtorInfo) : TermElabM (TSyntax `command) := do
     `((fun $x => $(mkIdent ctorName) $outFields:term*) <$> $visit $(fvs[i]!)))
   let defname : Name := baseName ++ Name.modifyHead (fun n => s!"modifyM{n.capitalize}") fieldName
   if ← (isExhaustive ctors indName) then
-    let docstring := mkDocComment <|  s!"Runs the given `visit` function on the `{fieldName}` field."
+    let docstring := mkDocComment <| s!"Runs the given `visit` function on the `{fieldName}` field."
     `(
       $docstring:docComment
       def $(mkIdent defname):ident
@@ -228,7 +228,7 @@ private def mkModifyM (c : CtorInfo) : TermElabM (TSyntax `command) := do
         $[| $lhs => $rhs]*
     )
   else
-    let docstring := mkDocComment <|  s!"Runs the given `visit` function on the `{fieldName}` field if present.
+    let docstring := mkDocComment <| s!"Runs the given `visit` function on the `{fieldName}` field if present.
             Performing the pure op if the given `{indName}` is not a {ctorNameOrList ctors}."
     `(
       $docstring:docComment
@@ -279,8 +279,9 @@ private def mkOpticsCore (indVal : InductiveVal) : TermElabM (Array Syntax.Comma
     for ctor in indVal.ctors do
       let na : Name := (Lake.toUpperCamelCase ctor).appendBefore "is"
       let (lhs, rhs) ← mkAlt (fun _ => `(true)) ctor
+      let docstring := mkDocComment <| s!"Is this an instance of `{ctor}`."
       let cmd : TSyntax `command ← `(
-        -- TODO doc here
+        $docstring:docComment
         def $(mkIdent na):ident $implicitBinders:bracketedBinder* : $indType → Bool
           | $lhs => $rhs
           | _ => false
