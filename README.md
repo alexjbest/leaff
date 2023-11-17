@@ -1,8 +1,9 @@
 Leaff
 =====
 
-Leaff is a diff tool for Lean environments.
-It is currently under development and should be considered version alpha.
+Leaff is a diff tool for Lean environments. It aims to produce a human readable summary of the differences between two versions of the same Lean module stored in olean files. For example it can be used to detect unexpected changes to, or removal of, theorems when a refactor is carried out in a large library.
+
+It is currently under development and should be considered version alpha (contributions welcome!).
 It is not currently particularly user friendly, though it is at least fast enough to run on the scale of `mathlib`.
 Nevertheless at the moment it does at least provide some potentially useful output e.g.
 
