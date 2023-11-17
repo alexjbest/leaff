@@ -9,7 +9,15 @@ Nevertheless at the moment it does at least provide some potentially useful outp
 
 
 ```
-(base) alexanderbest@nmslap008245:~/leaff$ lake exe leaff Mathlib "lake-packages/mathlib//lake-packages/std/build/lib","lake-packages/mathlib//lake-packages/Qq/build/lib","lake-packages/mathlib//lake-packages/aesop/build/lib","lake-packages/mathlib//lake-packages/Cli/build/lib","lake-packages/mathlib//lake-packages/proofwidgets/build/lib","lake-packages/mathlib//build/lib","/home/alexanderbest/.elan/toolchains/leanprover--lean4---v4.3.0-rc1/lib/lean" "lake-packages/mathlib2//lake-packages/std/build/lib","lake-packages/mathlib2//lake-packages/Qq/build/lib","lake-packages/mathlib2//lake-packages/aesop/build/lib","lake-packages/mathlib2//lake-packages/Cli/build/lib","lake-packages/mathlib2//lake-packages/proofwidgets/build/lib","lake-packages/mathlib2//build/lib","/home/alexanderbest/.elan/toolchains/leanprover--lean4---v4.3.0-rc1/lib/lean"
+(base) alexanderbest@nmslap008245:~/leaff$ lake exe leaff Mathlib $(tr ':' ',' <<<"$(eval $(lake --dir lake-packages/mathlib/ env) && echo $LEAN_PATH)") $(tr ':' ',' <<<"$(eval $(lake --dir lake-packages/mathlib2/ env) && echo $LEAN_PATH)")
+info: [330/336] Building Leaff.Diff
+info: stdout:
+./././Leaff/Diff.lean:195:17: warning: unused variable `old` [linter.unusedVariables]
+./././Leaff/Diff.lean:195:21: warning: unused variable `new` [linter.unusedVariables]
+./././Leaff/Diff.lean:320:6: warning: unused variable `sp` [linter.unusedVariables]
+info: [331/336] Compiling Leaff.Diff
+info: [331/336] Building Leaff
+info: [332/336] Building Main
 info: [336/336] Linking leaff
 newModule: Mathlib
 oldModule: Mathlib
@@ -259,5 +267,5 @@ proof changed for normalizeScaleRoots_coeff_mul_leadingCoeff_pow
 proof changed for Field.finiteDimensional_of_exists_primitive_element
 proof changed for RingOfIntegers.isUnit_norm_of_isGalois
 236 differences, some not shown
-total 22.7s
+total 12s
 ```
