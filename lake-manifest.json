@@ -20,15 +20,23 @@
   {"git":
    {"url": "https://github.com/leanprover-community/mathlib4",
     "subDir?": null,
-    "rev": "26fbe28dbd3c6c1ee862b9c78eb1078378e1a1c5",
+    "rev": "30d39f9a058b13ec1786a90af4c051d650762951",
     "opts": {},
-    "name": "Mathlib",
-    "inputRev?": "master",
+    "name": "mathlib",
+    "inputRev?": "30d39f9a058b13ec1786a90af4c051d650762951",
+    "inherited": false}},
+  {"git":
+   {"url": "https://github.com/leanprover-community/mathlib4",
+    "subDir?": null,
+    "rev": "d9ba3f07499769fc5730aea4be84298a2c13ff61",
+    "opts": {},
+    "name": "mathlib2",
+    "inputRev?": "d9ba3f07499769fc5730aea4be84298a2c13ff61",
     "inherited": false}},
   {"git":
    {"url": "https://github.com/leanprover-community/quote4",
     "subDir?": null,
-    "rev": "d3a1d25f3eba0d93a58d5d3d027ffa78ece07755",
+    "rev": "511eb96eca98a7474683b8ae55193a7e7c51bc39",
     "opts": {},
     "name": "Qq",
     "inputRev?": "master",
@@ -36,7 +44,7 @@
   {"git":
    {"url": "https://github.com/leanprover-community/aesop",
     "subDir?": null,
-    "rev": "bf5ab42a58e71de7ebad399ce3f90d29aae7fca9",
+    "rev": "cb87803274405db79ec578fc07c4730c093efb90",
     "opts": {},
     "name": "aesop",
     "inputRev?": "master",
@@ -44,9 +52,9 @@
   {"git":
    {"url": "https://github.com/leanprover-community/ProofWidgets4",
     "subDir?": null,
-    "rev": "c3b9f0d4ebedc43635d3f7e764e277b1010844b7",
+    "rev": "f1a5c7808b001305ba07d8626f45ee054282f589",
     "opts": {},
     "name": "proofwidgets",
-    "inputRev?": "v0.0.22",
+    "inputRev?": "v0.0.21",
     "inherited": true}}],
  "name": "leaff"}
