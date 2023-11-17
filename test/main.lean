@@ -2,14 +2,10 @@ import Leaff.Diff
 
 open Lean
 
-def sp₁ : SearchPath := "."/"lake-packages"/"mathlib"/"build"/"lib" :: "."/"lake-packages"/"mathlib"/"lake-packages"/"proofwidgets"/"build"/"lib" :: "."/"lake-packages"/"mathlib"/"lake-packages"/"aesop"/"build"/"lib" ::
-    "."/"lake-packages"/"mathlib"/"lake-packages"/"Qq"/"build"/"lib" :: "."/"lake-packages"/"mathlib"/"lake-packages"/"std"/"build"/"lib" :: []
-def sp₂ : SearchPath := "."/"lake-packages"/"mathlib2"/"build"/"lib" :: "."/"lake-packages"/"mathlib2"/"lake-packages"/"proofwidgets"/"build"/"lib" :: "."/"lake-packages"/"mathlib2"/"lake-packages"/"aesop"/"build"/"lib" ::
-      "."/"lake-packages"/"mathlib2"/"lake-packages"/"Qq"/"build"/"lib" :: "."/"lake-packages"/"mathlib2"/"lake-packages"/"std"/"build"/"lib" :: []
+def sp : SearchPath :=
+["."/".lake" /"build"/"lib","."/".lake" /"packages"/"std"/"build"/"lib","/home/alexanderbest/.elan/toolchains/leanprover--lean4---v4.3.0-rc2/lib/lean"]
 
-#eval summarizeDiffImports #[`Std.Classes.RatCast] #[`Std.Data.Rat] sp₁ sp₂
-#eval summarizeDiffImports #[`Mathlib] #[`Mathlib] sp₁ sp₂
--- #[`Std.Data.Fin.Init.Lemmas]
+#eval summarizeDiffImports #[`Std.Classes.RatCast] #[`Std.Data.Rat] sp sp
+-- #eval summarizeDiffImports #[`Mathlib] #[`Mathlib] sp₁ sp₂
 
-
-#eval summarizeDiffImports #[`test.TestA] #[`test.TestB] sp₁ sp₂
+#eval summarizeDiffImports #[`test.TestA] #[`test.TestB] sp sp

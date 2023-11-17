@@ -159,28 +159,27 @@ def summarize (diffs : List Diff) : Format := Id.run do
   for d in diffs do
     -- TODO this should be a match
     -- TODO should build a big list of types and priorities and then sort by lex on prio then type
-    if d.isAdded then out := out.append <| format s!"added {name! d}\n" -- awkward that we can't use dot notation with nested
-    if d.isRemoved then out := out.append <| format s!"removed {name! d}\n"
-    -- TDOO namespaceonly
-    if d.isRenamed then out := out.append <| format s!"renamed {oldName! d} → {newName! d}\n"
-    if d.isMovedToModule then out := out.append <| format s!"moved {name! d} to {newModuleName! d}\n"
-    if d.isMovedWithinModule then out := out.append <| format s!"moved {name! d} within module {moduleName! d}\n"
-    if d.isProofChanged then out := out.append <| format s!"proof changed for {name! d}\n"
-    if d.isTypeChanged then out := out.append <| format s!"type changed for {name! d}\n"
-    if d.isSpeciesChanged then out := out.append <| format s!"{name! d} changed from {fro! d} to {to! d}\n"
-    if d.isExtensionEntriesModified then out := out.append <| format s!"extension entry modified for {ext! d}\n"
-    if d.isDocChanged then out := out.append <| format s!"doc modified for {name! d}\n"
-    if d.isDocAdded   then out := out.append <| format s!"doc added to {name! d}\n"
-    if d.isDocRemoved then out := out.append <| format s!"doc removed from {name! d}\n"
-    if d.isModuleRenamed then out := out.append <| format s!"module renamed {oldName! d} → {newName! d}\n"
-    if d.isAttributeAdded then out := out.append <| format s!"attribute {attrName! d} added to {name! d}\n"
-    if d.isAttributeRemoved then out := out.append <| format s!"attribute {attrName! d} removed from {name! d}\n"
-    if d.isAttributeChanged then out := out.append <| format s!"attribute {attrName! d} changed for {name! d}\n"
-    if d.isDirectImportAdded then out := out.append <| format s!"direct import {importName! d} added to {module! d}\n"
-    if d.isDirectImportRemoved then out := out.append <| format s!"direct import {importName! d} removed from {module! d}\n"
-    if d.isTransitiveImportAdded then out := out.append <| format s!"transitive import {importName! d} added to {module! d}\n"
-    if d.isTransitiveImportRemoved then out := out.append <| format s!"transitive import {importName! d} removed from {module! d}\n"
-    -- dbg_trace (repr d)
+    if d.isAdded then out := out.append <| format s!"+ added {name! d}\n" -- awkward that we can't use dot notation with nested
+    if d.isRemoved then out := out.append <| format s!"- removed {name! d}\n"
+    -- TODO namespace only
+    if d.isRenamed then out := out.append <| format s!"! renamed {oldName! d} → {newName! d}\n"
+    if d.isMovedToModule then out := out.append <| format s!"! moved {name! d} to {newModuleName! d}\n"
+    if d.isMovedWithinModule then out := out.append <| format s!"! moved {name! d} within module {moduleName! d}\n"
+    if d.isProofChanged then out := out.append <| format s!"! proof changed for {name! d}\n"
+    if d.isTypeChanged then out := out.append <| format s!"! type changed for {name! d}\n"
+    if d.isSpeciesChanged then out := out.append <| format s!"! {name! d} changed from {fro! d} to {to! d}\n"
+    if d.isExtensionEntriesModified then out := out.append <| format s!"! extension entry modified for {ext! d}\n"
+    if d.isDocChanged then out := out.append <| format s!"! doc modified for {name! d}\n"
+    if d.isDocAdded   then out := out.append <| format s!"+ doc added to {name! d}\n"
+    if d.isDocRemoved then out := out.append <| format s!"- doc removed from {name! d}\n"
+    if d.isModuleRenamed then out := out.append <| format s!"! module renamed {oldName! d} → {newName! d}\n"
+    if d.isAttributeAdded then out := out.append <| format s!"+ attribute {attrName! d} added to {name! d}\n"
+    if d.isAttributeRemoved then out := out.append <| format s!"- attribute {attrName! d} removed from {name! d}\n"
+    if d.isAttributeChanged then out := out.append <| format s!"! attribute {attrName! d} changed for {name! d}\n"
+    if d.isDirectImportAdded then out := out.append <| format s!"+ direct import {importName! d} added to {module! d}\n"
+    if d.isDirectImportRemoved then out := out.append <| format s!"- direct import {importName! d} removed from {module! d}\n"
+    if d.isTransitiveImportAdded then out := out.append <| format s!"+ transitive import {importName! d} added to {module! d}\n"
+    if d.isTransitiveImportRemoved then out := out.append <| format s!"- transitive import {importName! d} removed from {module! d}\n"
   out := out.append (format s!"{diffs.size} differences, some not shown")
   pure out
 
@@ -318,7 +317,7 @@ end Lean.Environment
 unsafe
 def summarizeDiffImports (imports₁ imports₂ : Array Import) (sp₁ sp₂ : SearchPath) : IO Unit := timeit "total" <| do
   searchPathRef.set sp₁
-  IO.println (← searchPathRef.get)
+  -- IO.println (← searchPathRef.get)
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
   withImportModules imports₁ opts trustLevel fun env₁ => do

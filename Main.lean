@@ -9,13 +9,13 @@ def runDiffCmd (p : Parsed) : IO UInt32 := do
   let oldModule : ModuleName   :=
     if p.hasFlag "oldModule" then p.flag! "oldModule" |>.as! ModuleName
     else p.positionalArg! "newModule" |>.as! ModuleName
-  IO.println <| "newModule: " ++ toString newModule
-  IO.println <| "oldModule: " ++ toString oldModule
+  -- IO.println <| "newModule: " ++ toString newModule
+  -- IO.println <| "oldModule: " ++ toString oldModule
 
   let newSearchPath := p.positionalArg! "newSearchPath" |>.as! (Array String)
-  IO.println <| toString <| newSearchPath
+  -- IO.println <| toString <| newSearchPath
   let oldSearchPath := p.positionalArg! "oldSearchPath" |>.as! (Array String)
-  IO.println <| toString <| oldSearchPath
+  -- IO.println <| toString <| oldSearchPath
 
   summarizeDiffImports #[⟨oldModule, false⟩] #[⟨newModule, false⟩] (oldSearchPath.toList.map Coe.coe) (newSearchPath.toList.map Coe.coe)
   return 0
