@@ -317,14 +317,13 @@ end Lean.Environment
 -- TODO rename to old new
 unsafe
 def summarizeDiffImports (imports₁ imports₂ : Array Import) (sp₁ sp₂ : SearchPath) : IO Unit := timeit "total" <| do
-  let sp ← searchPathRef.get
-  searchPathRef.set (sp₁ ++ sp) -- TODO prepend or replace?
+  searchPathRef.set sp₁
   IO.println (← searchPathRef.get)
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
   withImportModules imports₁ opts trustLevel fun env₁ => do
     -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
     -- to reduce the need for multiple checkouts
-    searchPathRef.set (sp₂ ++ sp)
+    searchPathRef.set sp₂
     withImportModules imports₂ opts trustLevel fun env₂ => do
       IO.println <| Diff.summarize (← env₁.diff env₂)
