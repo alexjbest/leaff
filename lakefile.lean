@@ -4,6 +4,8 @@ open Lake DSL
 
 require Cli from git "https://github.com/leanprover/lean4-cli.git" @ "main"
 require std from git "https://github.com/leanprover/std4.git" @ "main"
+meta if get_config? mathlib = some "on" then
+require Mathlib from git "https://github.com/leanprover-community/mathlib4" @ "master"
 
 package «leaff» {
   -- add package configuration options here
@@ -22,7 +24,3 @@ lean_lib «Leaff» {
 lean_exe «leaff» {
   root := `Main
 }
-
-
-meta if get_config? mathlib = some "on" then
-require «mathlib» from git "https://github.com/leanprover-community/mathlib4" @ "master"

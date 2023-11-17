@@ -18,11 +18,11 @@ def logHashCollisions (e : Environment) : IO Unit := do
       for e in o.2 do
         dbg_trace (toString e.1)
 
-elab "a" : command => do
+elab "hashcol" : command => do
   let e ← getEnv
   Command.liftCoreM  <| logHashCollisions e
 
-a
+hashcol
 
 #eval (Lean.mkConst `Nat).hash
 #eval (Lean.mkConst `Nat).hash
