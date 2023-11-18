@@ -15,13 +15,13 @@ import Leaff.HashSet
 -/
 open Lean
 /--
-Traits are functions from `ConstantInfo` to some type `α` that when changed,
+Traits are functions from `ConstantInfo` to some hashable type `α` that when changed,
 results in some meaningful difference between two constants.
 For instance the type, name, value of a constant, or whether it is an axiom,
 theorem, or definition. -/
 structure Trait :=
   α : Type
-  val : ConstantInfo → α
+  val : ConstantInfo → Environment → α
   id : Name
   [ins : Hashable α]
 
@@ -29,13 +29,14 @@ instance : BEq Trait where
    beq a b := a.id == b.id
 instance {t : Trait} : Hashable t.α := t.ins
 
-def Trait.mk' (α : Type) [Hashable α] (val : ConstantInfo → α) (name : Name := by exact decl_name%) : Trait := ⟨α, val, name⟩
+def Trait.mk' (α : Type) [Hashable α] (val : ConstantInfo → Environment → α) (name : Name := by exact decl_name%) :
+  Trait := ⟨α, val, name⟩
 namespace Trait
-def type : Trait := Trait.mk' Expr ConstantInfo.type
-def value : Trait := Trait.mk' Expr ConstantInfo.value!
+def type : Trait := Trait.mk' Expr (fun c _ => c.type)
+def value : Trait := Trait.mk' Expr (fun c _ => c.value!)
 
-def name : Trait := Trait.mk' Name ConstantInfo.name
-def species : Trait := Trait.mk' String fun
+def name : Trait := Trait.mk' Name (fun c _ => c.name)
+def species : Trait := Trait.mk' String fun c _ => (fun
   | .axiomInfo _ => "axiom"
   | .defnInfo _ => "def"
   | .thmInfo _ => "thm"
@@ -43,15 +44,17 @@ def species : Trait := Trait.mk' String fun
   | .quotInfo _ => "quot"
   | .inductInfo _ => "induct"
   | .ctorInfo _ => "ctor"
-  | .recInfo _ => "rec"
+  | .recInfo _ => "rec") c -- TODO is there a better way to do this
 
--- TODO add module trait, needs env
+def module : Trait := Trait.mk' (Option Nat) (fun c e => e.getModuleIdxFor? c.name)
+
 -- TODO add universe vars trait? possibly already covered by type
 
-def relevantTraits : List Trait := [name, type, value, species]
+def relevantTraits : List Trait := [name, type, value, species, module]
 -- TODO maybe find some way to make absence of some traits imply others
-def hashExcept (t : Trait) : ConstantInfo → UInt64 :=
-  (relevantTraits.filter (· != t)).foldl (fun h t c => mixHash (hash (t.val c)) (h c)) (fun _ => 7) -- TODO 0 or 7...
+@[specialize 1]
+def hashExcept (t : Trait) : ConstantInfo → Environment → UInt64 :=
+  (relevantTraits.filter (· != t)).foldl (fun h t c e => mixHash (hash (t.val c e)) (h c e)) (fun _ _ => 7) -- TODO 0 or 7...
 
 -- section testing
 -- def aaaa := 1
@@ -96,9 +99,9 @@ inductive Diff : Type
   | movedWithinModule (name moduleName : Name)
   | proofChanged (name : Name) (isProofRelevant : Bool) -- TODO maybe value changed also for defs
   | typeChanged (name : Name)
-  | speciesChanged (name : Name) (fro to : String)
+  | speciesChanged (name : Name) (fro to : String) -- species is axiom, def, thm, opaque, quot, induct, ctor, rec
   | extensionEntriesModified (ext : Name)
-  | docChanged (name : Name) -- TODO how does module/opther doc fit in here
+  | docChanged (name : Name) -- TODO how does module/other doc fit in here
   | docAdded (name : Name)
   | docRemoved (name : Name)
   | moduleRenamed (oldName newName : Name)
@@ -111,9 +114,7 @@ inductive Diff : Type
   | transitiveImportRemoved (module importName : Name)
 deriving DecidableEq, Repr
 
--- TODO changed def to lemma or vice versa
 -- TODO distinguish between proof changed and value changed
-
 
 -- TODO maybe variant "optic"s for isBlah that returns all args of blah not just a bool
 -- set_option trace.derive_optics true
@@ -123,18 +124,21 @@ namespace Diff
 /-- Priority for displaying diffs, lower numbers are more important and should come first in the output.
 These should all be distinct as it is what we use to group diffs also -/
 def prio : Diff → Nat
-  | .added _ => 11
-  | .removed _ => 12
-  | .renamed _ _ _ => 21 -- TODO namespace lower
+  | .added _ => 8
+  | .removed _ => 9
+  | .renamed _ _ false => 20
+  | .renamed _ _ true => 21
   | .movedToModule _ _ _ => 22
   | .movedWithinModule _ _ => 31
-  | .proofChanged _ _ => 23 -- TODO higher if proof relevant
-  | .typeChanged _ => 13
+  | .proofChanged _ true => 11 -- if the declaration is proof relevant (i.e. a def) then it is more important
+  | .proofChanged _ _ => 23
+  | .typeChanged _ => 10
   | .speciesChanged _ _ _ => 14
   | .extensionEntriesModified _ => 15
   | .docChanged _ => 24
   | .docAdded _ => 25
   | .docRemoved _ => 16
+  -- TOOD maybe module added and removed?
   | .moduleRenamed _ _ => 17
   | .attributeAdded _ _ => 18
   | .attributeRemoved _ _ => 19
@@ -146,10 +150,9 @@ def prio : Diff → Nat
 
 open Std
 -- TODO can we make the output richer,
--- colours
+-- colours (sort of handled by diff format in github)
 -- links / messagedata in the infoview maybe extracted as links somehow
--- group by filename
--- should group also by most important first, moves aren't interesting normally!
+-- group by filename?
 open ToFormat in
 def summarize (diffs : List Diff) : Format := Id.run do
   if diffs = [] then return "No differences found."
@@ -157,29 +160,30 @@ def summarize (diffs : List Diff) : Format := Id.run do
   let mut diffs := diffs.toArray
   diffs := diffs.qsort (fun a b => a.prio < b.prio)
   for d in diffs do
-    -- TODO this should be a match
-    -- TODO should build a big list of types and priorities and then sort by lex on prio then type
-    if d.isAdded then out := out.append <| format s!"+ added {name! d}\n" -- awkward that we can't use dot notation with nested
-    if d.isRemoved then out := out.append <| format s!"- removed {name! d}\n"
-    -- TODO namespace only
-    if d.isRenamed then out := out.append <| format s!"! renamed {oldName! d} → {newName! d}\n"
-    if d.isMovedToModule then out := out.append <| format s!"! moved {name! d} to {newModuleName! d}\n"
-    if d.isMovedWithinModule then out := out.append <| format s!"! moved {name! d} within module {moduleName! d}\n"
-    if d.isProofChanged then out := out.append <| format s!"! proof changed for {name! d}\n"
-    if d.isTypeChanged then out := out.append <| format s!"! type changed for {name! d}\n"
-    if d.isSpeciesChanged then out := out.append <| format s!"! {name! d} changed from {fro! d} to {to! d}\n"
-    if d.isExtensionEntriesModified then out := out.append <| format s!"! extension entry modified for {ext! d}\n"
-    if d.isDocChanged then out := out.append <| format s!"! doc modified for {name! d}\n"
-    if d.isDocAdded   then out := out.append <| format s!"+ doc added to {name! d}\n"
-    if d.isDocRemoved then out := out.append <| format s!"- doc removed from {name! d}\n"
-    if d.isModuleRenamed then out := out.append <| format s!"! module renamed {oldName! d} → {newName! d}\n"
-    if d.isAttributeAdded then out := out.append <| format s!"+ attribute {attrName! d} added to {name! d}\n"
-    if d.isAttributeRemoved then out := out.append <| format s!"- attribute {attrName! d} removed from {name! d}\n"
-    if d.isAttributeChanged then out := out.append <| format s!"! attribute {attrName! d} changed for {name! d}\n"
-    if d.isDirectImportAdded then out := out.append <| format s!"+ direct import {importName! d} added to {module! d}\n"
-    if d.isDirectImportRemoved then out := out.append <| format s!"- direct import {importName! d} removed from {module! d}\n"
-    if d.isTransitiveImportAdded then out := out.append <| format s!"+ transitive import {importName! d} added to {module! d}\n"
-    if d.isTransitiveImportRemoved then out := out.append <| format s!"- transitive import {importName! d} removed from {module! d}\n"
+    out := out.append <| match d with
+      | .added name => format s!"+ added {name}\n"
+      | .removed name => format s!"- removed {name}\n"
+      -- TODO namespace only
+      | .renamed oldName newName true => format s!"! renamed {oldName} → {newName} (changed namespace)\n"
+      | .renamed oldName newName false => format s!"! renamed {oldName} → {newName}\n"
+      | .movedToModule name oldModuleName newModuleName => format s!"! moved {name} from {oldModuleName} to {newModuleName}\n"
+      | .movedWithinModule name moduleName => format s!"! moved {name} within module {moduleName}\n"
+      | .proofChanged name true => format s!"! value changed for {name}\n"
+      | .proofChanged name false => format s!"! proof changed for {name}\n"
+      | .typeChanged name => format s!"! type changed for {name}\n"
+      | .speciesChanged name fro to => format s!"! {name} changed from {fro} to {to}\n"
+      | .extensionEntriesModified ext => format s!"! extension entry modified for {ext}\n"
+      | .docChanged name => format s!"! doc modified for {name}\n"
+      | .docAdded name => format s!"+ doc added to {name}\n"
+      | .docRemoved name => format s!"- doc removed from {name}\n"
+      | .moduleRenamed oldName newName => format s!"! module renamed {oldName} → {newName}\n"
+      | .attributeAdded attrName name => format s!"+ attribute {attrName} added to {name}\n"
+      | .attributeRemoved attrName name => format s!"- attribute {attrName} removed from {name}\n"
+      | .attributeChanged attrName name => format s!"! attribute {attrName} changed for {name}\n"
+      | .directImportAdded module importName => format s!"+ direct import {importName} added to {module}\n"
+      | .directImportRemoved module importName => format s!"- direct import {importName} removed from {module}\n"
+      | .transitiveImportAdded module importName => format s!"+ transitive import {importName} added to {module}\n"
+      | .transitiveImportRemoved module importName => format s!"- transitive import {importName} removed from {module}\n"
   out := out.append (format s!"{diffs.size} differences, some not shown")
   pure out
 
@@ -228,8 +232,8 @@ def extDiffs (old new : Environment) : IO (List Diff) := do
 open Trait
 
 
--- TODO make this the hash of all relevantTraits, but
-def diffHash (c : ConstantInfo) : UInt64 := mixHash (hash <| species.val c) <| mixHash c.name.hash <| mixHash c.type.hash c.value!.hash
+-- TODO make this the hash of all relevantTraits, but check speed impact
+def diffHash (c : ConstantInfo) (e : Environment) : UInt64 := mixHash (hash <| module.val c e) <| mixHash (hash <| species.val c e) <| mixHash c.name.hash <| mixHash c.type.hash c.value!.hash
 
 def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace new.header.moduleNames
@@ -249,10 +253,10 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- TODO reconsider internals, how useful are they
   -- note everything should be in map₁ as we loaded from file
   let oldhashes := (HashMap.fold (fun old name const =>
-    if const.hasValue && ¬ name.isInternal' then old.insert name else old) (@mkHashSet Name _ ⟨fun n => diffHash <| old.constants.map₁.find! n⟩ sz) old.constants.map₁)
+    if const.hasValue && ¬ name.isInternal' then old.insert name else old) (@mkHashSet Name _ ⟨fun n => diffHash (old.constants.map₁.find! n) old⟩ sz) old.constants.map₁)
   dbg_trace "hashes1 made"
   let newhashes := (HashMap.fold (fun old name const =>
-    if const.hasValue && ¬ name.isInternal' then old.insert name else old) (@mkHashSet Name _ ⟨fun n => diffHash <| new.constants.map₁.find! n⟩ sz) new.constants.map₁)
+    if const.hasValue && ¬ name.isInternal' then old.insert name else old) (@mkHashSet Name _ ⟨fun n => diffHash (new.constants.map₁.find! n) new⟩ sz) new.constants.map₁)
   dbg_trace "hashes2 made"
   -- out := out ++ (newnames.sdiff oldnames).toList.map .added
   -- out := out ++ (oldnames.sdiff newnames).toList.map .removed
@@ -273,12 +277,13 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
     let f := t.hashExcept
     let mut hs : HashMap UInt64 (Name × Bool) := HashMap.empty
     let mut co := true
+    -- TODO actually check trait differences when found here!?
     for b in befores do
-      (hs, co) := hs.insert' (f b) (b.name, true)
+      (hs, co) := hs.insert' (f b old) (b.name, true)
       if co then dbg_trace s!"collision, all bets are off {b.name}"
     for a in afters do
-      if hs.contains (f a) then
-        let (bn, _) := hs.find! (f a)
+      if hs.contains (f a new) then
+        let (bn, _) := hs.find! (f a new)
         let b := old.constants.map₁.find! bn
         if t == name then
           out := .renamed bn a.name false :: out
@@ -293,7 +298,11 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
           explained := (a.name, true) :: (bn, false) :: explained
           continue
         if t == species then
-          out := .speciesChanged a.name (species.val b) (species.val a) :: out
+          out := .speciesChanged a.name (species.val b new) (species.val a new) :: out
+          explained := (a.name, true) :: (bn, false) :: explained
+        if t == module then
+          out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! a.name).toNat]!
+            new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
           explained := (a.name, true) :: (bn, false) :: explained
   dbg_trace "comps"
   for a in afters do
@@ -312,17 +321,16 @@ def diff (old new : Environment) : IO (List Diff) := do
 
 end Lean.Environment
 
--- TODO need some logic for checking lean versions
+-- TODO need some logic for checking lean versions agree otherwise we are in a world of hurt
 -- TODO rename to old new
 unsafe
-def summarizeDiffImports (imports₁ imports₂ : Array Import) (sp₁ sp₂ : SearchPath) : IO Unit := timeit "total" <| do
+def summarizeDiffImports (oldImports newImports : Array Import) (sp₁ sp₂ : SearchPath) : IO Unit := timeit "total" <| do
   searchPathRef.set sp₁
-  -- IO.println (← searchPathRef.get)
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
-  withImportModules imports₁ opts trustLevel fun env₁ => do
+  withImportModules oldImports opts trustLevel fun oldEnv => do
     -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
-    -- to reduce the need for multiple checkouts
+    -- to reduce the need for multiple checkouts, but that seems compilicated
     searchPathRef.set sp₂
-    withImportModules imports₂ opts trustLevel fun env₂ => do
-      IO.println <| Diff.summarize (← env₁.diff env₂)
+    withImportModules newImports opts trustLevel fun newEnv => do
+      IO.println <| Diff.summarize (← oldEnv.diff newEnv)
