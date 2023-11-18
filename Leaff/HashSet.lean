@@ -1,6 +1,7 @@
 import Lean.Data.HashSet
 import Std.Data.List.Basic
 
+--TODO consider removing Std dep
 
 namespace Array
 
@@ -24,7 +25,7 @@ unsafe def foldlM₂Unsafe {α : Type u} {β : Type v} {m : Type v → Type w} [
     pure init
 
 /-- Reference implementation for `foldlM`
-this is a custom fold over a pair of arrays, assuming their sizes are multiples of each other
+this is a custom fold over a pair of arrays
 -/
 @[implemented_by foldlM₂Unsafe]
 -- todo could be generalized
@@ -59,6 +60,8 @@ namespace Lean
   -- if l.numBuckets !=
   --    r.numBuckets then panic! "hash sets have different size" else -- TODO remove this restriction!
   Array.foldl₂ (fun o ll rl => o.insertMany <| (ll.diff rl).map ((·, true)) ++ (rl.diff ll).map ((·, false))) mkHashSet l.2.1 r.2.1
+
+-- TODO consider if we want the different sized version, or if we should try to expand the smaller in that case
 
 namespace HashSet
 
