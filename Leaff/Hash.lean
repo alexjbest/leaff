@@ -1,6 +1,4 @@
 import Lean
-import Std.Data.RBMap
-import Std
 open Lean Meta Elab Std
 
 def Lean.ConstantInfo.hash (c : ConstantInfo) : UInt64 := mixHash c.type.hash c.value!.hash

@@ -6,7 +6,6 @@ Authors: E.W.Ayers
 import Lean
 import Lean.Parser
 import Lake
-import Std.Data.RBMap
 open Lean Elab Command Term Tactic
 open Lean.Parser.Term
 open Lean.Parser.Command

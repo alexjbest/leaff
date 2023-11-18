@@ -1,5 +1,4 @@
 import Lean
-import Std.Data.RBMap.Basic
 import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
