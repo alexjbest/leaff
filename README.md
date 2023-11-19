@@ -8,8 +8,8 @@ It is not currently particularly user friendly, though it is at least fast enoug
 Nevertheless at the moment it does at least provide some potentially useful output e.g.
 
 
-```
-(base) alexanderbest@nmslap008245:~/leaff$ lake exe leaff Mathlib $(tr ':' ',' <<<"$(eval $(lake --dir ../test-mathlib2/ env) && echo $LEAN_PATH)") $(tr ':' ',' <<<"$(eval $(lake --dir ../test-mathlib/ env) && echo $LEAN_PATH)")
+```diff
+$ lake exe leaff Mathlib $(tr ':' ',' <<<"$(eval $(lake --dir ../test-mathlib2/ env) && echo $LEAN_PATH)") $(tr ':' ',' <<<"$(eval $(lake --dir ../test-mathlib/ env) && echo $LEAN_PATH)")
 hashes1 made
 hashes2 made
 diffs made
