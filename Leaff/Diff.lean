@@ -45,7 +45,7 @@ def species : Trait := Trait.mk' String fun c _ => (fun
   | .ctorInfo _ => "ctor"
   | .recInfo _ => "rec") c -- TODO is there a better way to do this
 
-def module : Trait := Trait.mk' (Option Nat) (fun c e => e.getModuleIdxFor? c.name)
+def module : Trait := Trait.mk' Name (fun c e => e.header.moduleNames[(e.getModuleIdxFor? c.name).get!.toNat]!)
 
 -- TODO add universe vars trait? possibly already covered by type
 
@@ -151,7 +151,7 @@ open Std
 -- TODO can we make the output richer,
 -- colours (sort of handled by diff format in github)
 -- links / messagedata in the infoview maybe extracted as links somehow
--- group by filename?
+-- TODO group by module name using @@module@@
 open ToFormat in
 def summarize (diffs : List Diff) : Format := Id.run do
   if diffs = [] then return "No differences found."
@@ -202,27 +202,49 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
   pure out
 
 
-/-- Copied from `whatsnew` by @gebner-/
+/-- Copied from `whatsnew` by @gebner and heavily cannibalized -/
 def diffExtension (old new : Environment)
     (ext : PersistentEnvExtension EnvExtensionEntry EnvExtensionEntry EnvExtensionState) :
-    (Option Diff) := unsafe
-  let oldSt := ext.toEnvExtension.getState old
-  let newSt := ext.toEnvExtension.getState new
+    IO (Option Diff) := do
+  let oldSt := ext.getState old
+  let newSt := ext.getState new
   -- if ptrAddrUnsafe oldSt == ptrAddrUnsafe newSt then return none
   -- dbg_trace oldSt.importedEntries
-  -- dbg_trace ext.statsFn oldSt.state
-  -- dbg_trace ext.statsFn newSt.state
-  let oldEntries := ext.exportEntriesFn oldSt.state
-  let newEntries := ext.exportEntriesFn newSt.state
-  if newEntries.size = oldEntries.size then none else
-  some <| .extensionEntriesModified ext.name
-  -- m!"-- {ext.name} extension: {(newEntries.size - oldEntries.size : Int)} new entries"
+  -- dbg_trace ext.statsFn oldSt
+  -- dbg_trace ext.statsFn newSt
+  let oldEntries := ext.exportEntriesFn oldSt
+  let newEntries := ext.exportEntriesFn newSt
+  -- dbg_trace oldEntries.size
+  -- dbg_trace newEntries.size
+  if ext.name = `Lean.classExtension then
+    -- for mod in [0:old.header.moduleData.size] do
+      -- (ext.getModuleEntries old mod)
+    -- IO.println (ext.getModuleEntries old mod).size
+    IO.println (classExtension.getState old).outParamMap.toList
+    if newEntries.size = oldEntries.size then return none else
+    return some <| .extensionEntriesModified ext.name
+    -- m!"-- {ext.name} extension: {(newEntries.size - oldEntries.size : Int)} new entries"
+  return none
 
+-- Which extensions do we care about?
+-- all??
+-- class (maybe not)
+-- instance
+-- declrange (maybe as an option)
+-- simp
+-- computable markers?
+-- coe?
+-- reducible?
+-- protected
+-- namespaces?
+-- docString, moduleDoc
 def extDiffs (old new : Environment) : IO (List Diff) := do
   let mut out : List Diff := []
+  dbg_trace "exts"
+  dbg_trace old.extensions.size
   for ext in ← persistentEnvExtensionsRef.get do
-    -- dbg_trace ext.name
-    if let some diff := diffExtension old new ext then
+    dbg_trace ext.name
+    if let some diff ← diffExtension old new ext then
       out := diff :: out
   -- let oldexts := RBSet.ofList (old.extensions Prod.fst) Name.cmp
   -- let newexts := RBSet.ofList (new.constants.map₁.toList.map Prod.fst) Name.cmp
@@ -230,6 +252,7 @@ def extDiffs (old new : Environment) : IO (List Diff) := do
 
 open Trait
 
+-- TODO do we want safety here
 
 -- TODO make this the hash of all relevantTraits, but check speed impact
 def diffHash (c : ConstantInfo) (e : Environment) : UInt64 := mixHash (hash <| module.val c e) <| mixHash (hash <| species.val c e) <| mixHash c.name.hash <| mixHash c.type.hash c.value!.hash
@@ -271,43 +294,46 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- -- dbg_trace dm.map (fun (c, rem) => (c.name, rem))
   -- TODO could use hashset here for explained
   let mut out : List Diff := []
-  let mut explained := []
-  for t in relevantTraits do
+  let mut explained : HashSet (Name × Bool) := HashSet.empty
+  for t in relevantTraits do -- TODO end user should be able to customize which traits
     let f := t.hashExcept
     let mut hs : HashMap UInt64 (Name × Bool) := HashMap.empty
     let mut co := true
     -- TODO actually check trait differences when found here!?
     for b in befores do
-      (hs, co) := hs.insert' (f b old) (b.name, true)
-      if co then dbg_trace s!"collision, all bets are off {b.name}"
+      if !explained.contains (b.name, true) then
+        (hs, co) := hs.insert' (f b old) (b.name, true)
+      if co then dbg_trace s!"collision when hashing for {t.id}, all bets are off {b.name}" -- TODO change to err print
     for a in afters do
+      if explained.contains (a.name, false) then
+        continue
       if hs.contains (f a new) then
         let (bn, _) := hs.find! (f a new)
         let b := old.constants.map₁.find! bn
         if t == name then
           out := .renamed bn a.name false :: out
-          explained := (a.name, true) :: (bn, false) :: explained
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == value then
           out := .proofChanged a.name false :: out -- TODO check if proof relevant
-          explained := (a.name, true) :: (bn, false) :: explained
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == type then
           out := .typeChanged a.name :: out
-          explained := (a.name, true) :: (bn, false) :: explained
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == species then
           out := .speciesChanged a.name (species.val b new) (species.val a new) :: out
-          explained := (a.name, true) :: (bn, false) :: explained
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
         if t == module then
           out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! a.name).toNat]!
             new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
-          explained := (a.name, true) :: (bn, false) :: explained
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
   dbg_trace "comps"
   for a in afters do
-    if !(a.name, false) ∈ explained then out := .added a.name :: out
+    if !explained.contains (a.name, false) then out := .added a.name :: out
   for b in befores do
-    if !(b.name, true) ∈ explained then out := .removed b.name :: out
+    if !explained.contains (b.name, true) then out := .removed b.name :: out
   pure out
 
 -- TODO some sort of minimization pass might be needed?
