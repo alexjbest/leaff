@@ -183,7 +183,7 @@ def summarize (diffs : List Diff) : Format := Id.run do
       | .directImportRemoved module importName => format s!"- direct import {importName} removed from {module}\n"
       | .transitiveImportAdded module importName => format s!"+ transitive import {importName} added to {module}\n"
       | .transitiveImportRemoved module importName => format s!"- transitive import {importName} removed from {module}\n"
-  out := out.append (format s!"{diffs.size} differences, some not shown")
+  out := out.append (format s!"{diffs.size} differences")
   pure out
 
 end Diff
