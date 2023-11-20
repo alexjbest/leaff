@@ -220,7 +220,7 @@ def diffExtension (old new : Environment)
     -- for mod in [0:old.header.moduleData.size] do
       -- (ext.getModuleEntries old mod)
     -- IO.println (ext.getModuleEntries old mod).size
-    IO.println (classExtension.getState old).outParamMap.toList
+    -- IO.println (classExtension.getState old).outParamMap.toList
     if newEntries.size = oldEntries.size then return none else
     return some <| .extensionEntriesModified ext.name
     -- m!"-- {ext.name} extension: {(newEntries.size - oldEntries.size : Int)} new entries"
@@ -240,10 +240,10 @@ def diffExtension (old new : Environment)
 -- docString, moduleDoc
 def extDiffs (old new : Environment) : IO (List Diff) := do
   let mut out : List Diff := []
-  dbg_trace "exts"
-  dbg_trace old.extensions.size
+  -- dbg_trace "exts"
+  -- dbg_trace old.extensions.size
   for ext in ← persistentEnvExtensionsRef.get do
-    dbg_trace ext.name
+    -- dbg_trace ext.name
     if let some diff ← diffExtension old new ext then
       out := diff :: out
   -- let oldexts := RBSet.ofList (old.extensions Prod.fst) Name.cmp
