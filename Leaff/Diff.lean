@@ -2,6 +2,7 @@ import Lean
 import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
+import Std.Lean.HashMap
 
 
 /-!
@@ -84,6 +85,7 @@ def Lean.Name.isInternal' (declName : Name) : Bool :=
   match declName with
   | .str _ s => "match_".isPrefixOf s || "proof_".isPrefixOf s
   | _        => true
+-- TODO maybe isBlackListed from mathlib instead?
 
 open Lean
 /--
@@ -103,6 +105,8 @@ inductive Diff : Type
   | docChanged (name : Name) -- TODO how does module/other doc fit in here
   | docAdded (name : Name)
   | docRemoved (name : Name)
+  | moduleAdded (name : Name)
+  | moduleRemoved (name : Name)
   | moduleRenamed (oldName newName : Name)
   | attributeAdded (attrName name : Name)
   | attributeRemoved (attrName name : Name)
@@ -123,29 +127,31 @@ namespace Diff
 /-- Priority for displaying diffs, lower numbers are more important and should come first in the output.
 These should all be distinct as it is what we use to group diffs also -/
 def prio : Diff → Nat
-  | .added _ => 8
-  | .removed _ => 9
-  | .renamed _ _ false => 20
-  | .renamed _ _ true => 21
-  | .movedToModule _ _ _ => 22
-  | .movedWithinModule _ _ => 31
-  | .proofChanged _ true => 11 -- if the declaration is proof relevant (i.e. a def) then it is more important
-  | .proofChanged _ _ => 23
-  | .typeChanged _ => 10
-  | .speciesChanged _ _ _ => 14
-  | .extensionEntriesModified _ => 15
-  | .docChanged _ => 24
-  | .docAdded _ => 25
-  | .docRemoved _ => 16
-  -- TOOD maybe module added and removed?
-  | .moduleRenamed _ _ => 17
-  | .attributeAdded _ _ => 18
-  | .attributeRemoved _ _ => 19
-  | .attributeChanged _ _ => 26
-  | .directImportAdded _ _ => 19
-  | .directImportRemoved _ _ => 27
-  | .transitiveImportAdded _ _ => 33
-  | .transitiveImportRemoved _ _ => 34
+  | .added _ => 80
+  | .removed _ => 90
+  | .renamed _ _ false => 200
+  | .renamed _ _ true => 210
+  | .movedToModule _ _ _ => 220
+  | .movedWithinModule _ _ => 310
+  | .proofChanged _ true => 110 -- if the declaration is proof relevant (i.e. a def) then it is more important
+  | .proofChanged _ _ => 230
+  | .typeChanged _ => 100
+  | .speciesChanged _ _ _ => 140
+  | .extensionEntriesModified _ => 150
+  | .docChanged _ => 240
+  | .docAdded _ => 250
+  | .docRemoved _ => 160
+  | .moduleAdded _ => 105
+  | .moduleRemoved _ => 107
+  | .moduleRenamed _ _ => 170
+  | .attributeAdded _ _ => 180
+  | .attributeRemoved _ _ => 190
+  | .attributeChanged _ _ => 260
+  | .directImportAdded _ _ => 195
+  | .directImportRemoved _ _ => 270
+  | .transitiveImportAdded _ _ => 330
+  | .transitiveImportRemoved _ _ => 340
+-- TODO maybe order this in src to make it clearer
 
 open Std
 -- TODO can we make the output richer,
@@ -160,29 +166,30 @@ def summarize (diffs : List Diff) : Format := Id.run do
   diffs := diffs.qsort (fun a b => a.prio < b.prio)
   for d in diffs do
     out := out.append <| match d with
-      | .added name => format s!"+ added {name}\n"
-      | .removed name => format s!"- removed {name}\n"
-      -- TODO namespace only
-      | .renamed oldName newName true => format s!"! renamed {oldName} → {newName} (changed namespace)\n"
-      | .renamed oldName newName false => format s!"! renamed {oldName} → {newName}\n"
+      | .added name                                     => format s!"+ added {name}\n"
+      | .removed name                                   => format s!"- removed {name}\n"
+      | .renamed oldName newName true                   => format s!"! renamed {oldName} → {newName} (changed namespace)\n"
+      | .renamed oldName newName false                  => format s!"! renamed {oldName} → {newName}\n"
       | .movedToModule name oldModuleName newModuleName => format s!"! moved {name} from {oldModuleName} to {newModuleName}\n"
-      | .movedWithinModule name moduleName => format s!"! moved {name} within module {moduleName}\n"
-      | .proofChanged name true => format s!"! value changed for {name}\n"
-      | .proofChanged name false => format s!"! proof changed for {name}\n"
-      | .typeChanged name => format s!"! type changed for {name}\n"
-      | .speciesChanged name fro to => format s!"! {name} changed from {fro} to {to}\n"
-      | .extensionEntriesModified ext => format s!"! extension entry modified for {ext}\n"
-      | .docChanged name => format s!"! doc modified for {name}\n"
-      | .docAdded name => format s!"+ doc added to {name}\n"
-      | .docRemoved name => format s!"- doc removed from {name}\n"
-      | .moduleRenamed oldName newName => format s!"! module renamed {oldName} → {newName}\n"
-      | .attributeAdded attrName name => format s!"+ attribute {attrName} added to {name}\n"
-      | .attributeRemoved attrName name => format s!"- attribute {attrName} removed from {name}\n"
-      | .attributeChanged attrName name => format s!"! attribute {attrName} changed for {name}\n"
-      | .directImportAdded module importName => format s!"+ direct import {importName} added to {module}\n"
-      | .directImportRemoved module importName => format s!"- direct import {importName} removed from {module}\n"
-      | .transitiveImportAdded module importName => format s!"+ transitive import {importName} added to {module}\n"
-      | .transitiveImportRemoved module importName => format s!"- transitive import {importName} removed from {module}\n"
+      | .movedWithinModule name moduleName              => format s!"! moved {name} within module {moduleName}\n"
+      | .proofChanged name true                         => format s!"! value changed for {name}\n"
+      | .proofChanged name false                        => format s!"! proof changed for {name}\n"
+      | .typeChanged name                               => format s!"! type changed for {name}\n"
+      | .speciesChanged name fro to                     => format s!"! {name} changed from {fro} to {to}\n"
+      | .extensionEntriesModified ext                   => format s!"! extension entry modified for {ext}\n"
+      | .docChanged name                                => format s!"! doc modified for {name}\n"
+      | .docAdded name                                  => format s!"+ doc added to {name}\n"
+      | .docRemoved name                                => format s!"- doc removed from {name}\n"
+      | .moduleAdded name                               => format s!"+ module added {name}\n"
+      | .moduleRemoved name                             => format s!"- module removed {name}\n"
+      | .moduleRenamed oldName newName                  => format s!"! module renamed {oldName} → {newName}\n"
+      | .attributeAdded attrName name                   => format s!"+ attribute {attrName} added to {name}\n"
+      | .attributeRemoved attrName name                 => format s!"- attribute {attrName} removed from {name}\n"
+      | .attributeChanged attrName name                 => format s!"! attribute {attrName} changed for {name}\n"
+      | .directImportAdded module importName            => format s!"+ direct import {importName} added to {module}\n"
+      | .directImportRemoved module importName          => format s!"- direct import {importName} removed from {module}\n"
+      | .transitiveImportAdded module importName        => format s!"+ transitive import {importName} added to {module}\n"
+      | .transitiveImportRemoved module importName      => format s!"- transitive import {importName} removed from {module}\n"
   out := out.append (format s!"{diffs.size} differences")
   pure out
 
@@ -196,16 +203,38 @@ open Std
 
 def importDiffs (old new : Environment) : List Diff := Id.run do
   let mut out : List Diff := []
-  -- dbg_trace new.header.moduleNames
+  let mut impHeierOld : RBMap Name (List Name) Name.quickCmp := mkRBMap _ _ _ -- TODO can we reuse any lake internals here?
+  let mut impHeierNew : RBMap Name (List Name) Name.quickCmp := mkRBMap _ _ _ -- TODO can we reuse any lake internals here?
+  let mut idx := 0
+  for mod in old.header.moduleNames do
+    impHeierOld := impHeierOld.insert mod (old.header.moduleData[idx]!.imports.map Import.module).toList -- TODO notation for such updates
+    idx := idx + 1
+  idx := 0
+  for mod in new.header.moduleNames do
+    impHeierNew := impHeierNew.insert mod (new.header.moduleData[idx]!.imports.map Import.module).toList -- TODO notation for such updates
+    idx := idx + 1
+
+  for mod in new.header.moduleNames.toList.diff old.header.moduleNames.toList do
+    out := .moduleAdded mod :: out
+  for mod in old.header.moduleNames.toList.diff new.header.moduleNames.toList do
+    out := .moduleRemoved mod :: out
+  for mod in new.header.moduleNames.toList ∩ old.header.moduleNames.toList do
+    for add in (impHeierNew.findD mod []).diff (impHeierOld.findD mod []) do
+      out := .directImportAdded mod add :: out
+    for rem in (impHeierOld.findD mod []).diff (impHeierNew.findD mod []) do
+      out := .directImportRemoved mod rem :: out
   -- dbg_trace new.header.moduleData[2]!.imports
-  -- everything should be in map₁ as we loaded from file?
   pure out
 
+-- TODO upstream
+instance [BEq α] [Hashable α] : ForIn m (SMap α β) (α × β) where
+  forIn t init f := do
+    forIn t.map₂ (← forIn t.map₁ init f) f
 
 /-- Copied from `whatsnew` by @gebner and heavily cannibalized -/
 def diffExtension (old new : Environment)
     (ext : PersistentEnvExtension EnvExtensionEntry EnvExtensionEntry EnvExtensionState) :
-    IO (Option Diff) := do
+    IO (List Diff) := do
   let oldSt := ext.getState old
   let newSt := ext.getState new
   -- if ptrAddrUnsafe oldSt == ptrAddrUnsafe newSt then return none
@@ -216,15 +245,20 @@ def diffExtension (old new : Environment)
   let newEntries := ext.exportEntriesFn newSt
   -- dbg_trace oldEntries.size
   -- dbg_trace newEntries.size
-  if ext.name = `Lean.classExtension then
-    -- for mod in [0:old.header.moduleData.size] do
-      -- (ext.getModuleEntries old mod)
-    -- IO.println (ext.getModuleEntries old mod).size
-    -- IO.println (classExtension.getState old).outParamMap.toList
-    if newEntries.size = oldEntries.size then return none else
-    return some <| .extensionEntriesModified ext.name
+  let mut out := []
+  match ext.name with
+  | ``Lean.classExtension => do
+      -- for mod in [0:old.header.moduleData.size] do
+        -- (ext.getModuleEntries old mod)
+      -- IO.println (ext.getModuleEntries old mod).size
+      for (a, _b) in (classExtension.getState new).outParamMap do
+        if ¬ (classExtension.getState old).outParamMap.contains a then
+          out := .attributeAdded `class a :: out
+  | _ => do
+    if newEntries.size ≠ oldEntries.size then
     -- m!"-- {ext.name} extension: {(newEntries.size - oldEntries.size : Int)} new entries"
-  return none
+      out := .extensionEntriesModified ext.name :: out
+  return out
 
 -- Which extensions do we care about?
 -- all??
@@ -244,10 +278,9 @@ def extDiffs (old new : Environment) : IO (List Diff) := do
   -- dbg_trace old.extensions.size
   for ext in ← persistentEnvExtensionsRef.get do
     -- dbg_trace ext.name
-    if let some diff ← diffExtension old new ext then
-      out := diff :: out
-  -- let oldexts := RBSet.ofList (old.extensions Prod.fst) Name.cmp
-  -- let newexts := RBSet.ofList (new.constants.map₁.toList.map Prod.fst) Name.cmp
+    out := (← diffExtension old new ext) ++ out
+  -- let oldexts := RBSet.ofList (old.extensions Prod.fst) Name.cmp -- TODO maybe quickCmp
+  -- let newexts := RBSet.ofList (new.constants.map₁.toList.map Prod.fst) Name.cmp -- TODO maybe quickCmp
   pure out
 
 open Trait
