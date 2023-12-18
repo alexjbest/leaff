@@ -10,3 +10,6 @@ theorem sada : Int := 123
 
 structure blah where
   (a b : Nat)
+
+/-- magic number-/
+def hasdoc : Int := 123

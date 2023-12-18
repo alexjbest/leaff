@@ -231,6 +231,7 @@ instance [BEq α] [Hashable α] : ForIn m (SMap α β) (α × β) where
   forIn t init f := do
     forIn t.map₂ (← forIn t.map₁ init f) f
 
+open private docStringExt in Lean.findDocString?
 /-- Copied from `whatsnew` by @gebner and heavily cannibalized -/
 def diffExtension (old new : Environment)
     (ext : PersistentEnvExtension EnvExtensionEntry EnvExtensionEntry EnvExtensionState) :
@@ -245,9 +246,34 @@ def diffExtension (old new : Environment)
   let newEntries := ext.exportEntriesFn newSt
   -- dbg_trace oldEntries.size
   -- dbg_trace newEntries.size
+  -- dbg_trace ext.name
   let mut out := []
   match ext.name with
-  | ``Lean.classExtension => do
+  | `Lean.docStringExt => do
+      dbg_trace "doc"
+      dbg_trace (SimplePersistentEnvExtension.getState docStringExt new).toList
+      for (a, b) in SimplePersistentEnvExtension.getState docStringExt new do
+        if ¬ (SimplePersistentEnvExtension.getState docStringExt old).contains a then
+          out := .docAdded a :: out
+        else
+          if (SimplePersistentEnvExtension.getState docStringExt old).find! a != b then
+            out := .docChanged a :: out
+      for (a, _b) in SimplePersistentEnvExtension.getState docStringExt old do
+        if ¬ (SimplePersistentEnvExtension.getState docStringExt new).contains a then
+          out := .docRemoved a :: out
+  | `Lean.classExtension => do
+      dbg_trace "doc"
+      dbg_trace (SimplePersistentEnvExtension.getState classExtension new).outParamMap.toList
+      -- for (a, b) in SimplePersistentEnvExtension.getState docStringExt new do
+      --   if ¬ (SimplePersistentEnvExtension.getState docStringExt old).contains a then
+      --     out := .docAdded a :: out
+      --   else
+      --     if (SimplePersistentEnvExtension.getState docStringExt old).find! a != b then
+      --       out := .docChanged a :: out
+      -- for (a, _b) in SimplePersistentEnvExtension.getState docStringExt old do
+      --   if ¬ (SimplePersistentEnvExtension.getState docStringExt new).contains a then
+      --     out := .docRemoved a :: out
+  | `Lean.classExtensin => do
       -- for mod in [0:old.header.moduleData.size] do
         -- (ext.getModuleEntries old mod)
       -- IO.println (ext.getModuleEntries old mod).size

@@ -1,4 +1,5 @@
 import Leaff.Diff
+import Lean
 
 open Lean
 
@@ -9,3 +10,6 @@ def sp : SearchPath :=
 -- #eval summarizeDiffImports #[`Mathlib] #[`Mathlib] sp₁ sp₂
 
 #eval summarizeDiffImports #[`test.TestA] #[`test.TestB] sp sp
+
+open private docStringExt in Lean.findDocString?
+#check docStringExt

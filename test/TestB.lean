@@ -10,3 +10,6 @@ def sada : Int := 123
 
 class blah where
   (a b : Nat)
+
+/-- not so magic number-/
+def hasdoc : Int := 123
