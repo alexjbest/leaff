@@ -97,7 +97,7 @@ inductive Diff : Type
   | removed (name : Name)
   | renamed (oldName newName : Name) (namespaceOnly : Bool)
   | movedToModule (name oldModuleName newModuleName : Name) -- maybe args here
-  | movedWithinModule (name moduleName : Name)
+  | movedWithinModule (name : Name)
   | proofChanged (name : Name) (isProofRelevant : Bool) -- TODO maybe value changed also for defs
   | typeChanged (name : Name)
   | speciesChanged (name : Name) (fro to : String) -- species is axiom, def, thm, opaque, quot, induct, ctor, rec
@@ -117,7 +117,6 @@ inductive Diff : Type
   | transitiveImportRemoved (module importName : Name)
 deriving DecidableEq, Repr
 
--- TODO distinguish between proof changed and value changed
 
 -- TODO maybe variant "optic"s for isBlah that returns all args of blah not just a bool
 -- set_option trace.derive_optics true
@@ -132,14 +131,14 @@ def prio : Diff → Nat
   | .renamed _ _ false => 200
   | .renamed _ _ true => 210
   | .movedToModule _ _ _ => 220
-  | .movedWithinModule _ _ => 310
+  | .movedWithinModule _ => 310
   | .proofChanged _ true => 110 -- if the declaration is proof relevant (i.e. a def) then it is more important
-  | .proofChanged _ _ => 230
+  | .proofChanged _ _ => 250
   | .typeChanged _ => 100
   | .speciesChanged _ _ _ => 140
   | .extensionEntriesModified _ => 150
   | .docChanged _ => 240
-  | .docAdded _ => 250
+  | .docAdded _ => 230
   | .docRemoved _ => 160
   | .moduleAdded _ => 105
   | .moduleRemoved _ => 107
@@ -164,6 +163,7 @@ def summarize (diffs : List Diff) : Format := Id.run do
   let mut out : Format := ("Found differences:" : Format).append .line
   let mut diffs := diffs.toArray
   diffs := diffs.qsort (fun a b => a.prio < b.prio)
+  -- TODO some cleanup pass here, for example if a decl is removed so will its attrs / doc, but this isn't relevant
   for d in diffs do
     out := out.append <| match d with
       | .added name                                     => format s!"+ added {name}\n"
@@ -171,7 +171,7 @@ def summarize (diffs : List Diff) : Format := Id.run do
       | .renamed oldName newName true                   => format s!"! renamed {oldName} → {newName} (changed namespace)\n"
       | .renamed oldName newName false                  => format s!"! renamed {oldName} → {newName}\n"
       | .movedToModule name oldModuleName newModuleName => format s!"! moved {name} from {oldModuleName} to {newModuleName}\n"
-      | .movedWithinModule name moduleName              => format s!"! moved {name} within module {moduleName}\n"
+      | .movedWithinModule name                         => format s!"! moved {name} within module\n"
       | .proofChanged name true                         => format s!"! value changed for {name}\n"
       | .proofChanged name false                        => format s!"! proof changed for {name}\n"
       | .typeChanged name                               => format s!"! type changed for {name}\n"
@@ -226,10 +226,40 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace new.header.moduleData[2]!.imports
   pure out
 
+
+namespace MapDeclarationExtension
+
+def getImportedState [Inhabited α] (ext : MapDeclarationExtension α) (env : Environment) : NameMap α :=
+RBMap.fromArray (ext.toEnvExtension.getState env).importedEntries.flatten Name.quickCmp
+  -- match env.getModuleIdxFor? declName with
+  -- | some modIdx =>
+  --   match (modIdx).binSearch (declName, default) (fun a b => Name.quickLt a.1 b.1) with
+  --   | some e => some e.2
+  --   | none   => none
+  -- | none => (ext.getState env).find? declName
+
+end MapDeclarationExtension
+namespace TagDeclarationExtension
+
+def getImportedState (ext : TagDeclarationExtension) (env : Environment) : NameSet :=
+RBTree.fromArray (ext.toEnvExtension.getState env).importedEntries.flatten Name.quickCmp
+
+end TagDeclarationExtension
+
+namespace SimpleScopedEnvExtension
+
+def getImportedState [Inhabited σ] (ext : SimpleScopedEnvExtension α σ) (env : Environment) : σ :=
+ext.getState env
+
+end SimpleScopedEnvExtension
+
 -- TODO upstream
 instance [BEq α] [Hashable α] : ForIn m (SMap α β) (α × β) where
   forIn t init f := do
     forIn t.map₂ (← forIn t.map₁ init f) f
+
+-- TODO upstream
+deriving instance BEq for DeclarationRanges
 
 open private docStringExt in Lean.findDocString?
 /-- Copied from `whatsnew` by @gebner and heavily cannibalized -/
@@ -248,22 +278,60 @@ def diffExtension (old new : Environment)
   -- dbg_trace newEntries.size
   -- dbg_trace ext.name
   let mut out := []
+  -- TODO map exts could be way more efficient, we already have sorted arrays of imported entries
   match ext.name with
-  | `Lean.docStringExt => do
-      dbg_trace "doc"
-      dbg_trace (SimplePersistentEnvExtension.getState docStringExt new).toList
-      for (a, b) in SimplePersistentEnvExtension.getState docStringExt new do
-        if ¬ (SimplePersistentEnvExtension.getState docStringExt old).contains a then
+  | ``Lean.declRangeExt => do
+      let os := MapDeclarationExtension.getImportedState declRangeExt old
+      let ns := MapDeclarationExtension.getImportedState declRangeExt new
+      for (a, b) in ns do
+        if os.find? a != b then
+          out := .movedWithinModule a :: out
+  | `Lean.docStringExt => do -- Note this is `` not `
+      let os := MapDeclarationExtension.getImportedState docStringExt old
+      let ns := MapDeclarationExtension.getImportedState docStringExt new
+      for (a, b) in ns do
+        if ¬ os.contains a then
           out := .docAdded a :: out
         else
-          if (SimplePersistentEnvExtension.getState docStringExt old).find! a != b then
+          if os.find! a != b then
             out := .docChanged a :: out
-      for (a, _b) in SimplePersistentEnvExtension.getState docStringExt old do
-        if ¬ (SimplePersistentEnvExtension.getState docStringExt new).contains a then
+      for (a, _b) in os do
+        if ¬ ns.contains a then
           out := .docRemoved a :: out
-  | `Lean.classExtension => do
-      dbg_trace "doc"
-      dbg_trace (SimplePersistentEnvExtension.getState classExtension new).outParamMap.toList
+  | ``Lean.protectedExt => do
+      let os := TagDeclarationExtension.getImportedState protectedExt old
+      let ns := TagDeclarationExtension.getImportedState protectedExt new
+      for a in ns do
+        if ¬ os.contains a then
+          out := .attributeAdded `protected a :: out
+      for a in os do
+        if ¬ ns.contains a then
+          out := .attributeRemoved `protected a :: out
+  | ``Lean.noncomputableExt => do
+      let os := TagDeclarationExtension.getImportedState noncomputableExt old
+      let ns := TagDeclarationExtension.getImportedState noncomputableExt new
+      for a in ns do
+        if ¬ os.contains a then
+          out := .attributeAdded `noncomputable a :: out
+      for a in os do
+        if ¬ ns.contains a then
+          out := .attributeRemoved `noncomputable a :: out
+  | ``Lean.Meta.globalInstanceExtension => do
+      let os := Lean.Meta.globalInstanceExtension.getState old
+      let ns := Lean.Meta.globalInstanceExtension.getState new
+      for (a,_) in ns do
+        if ¬ os.contains a then
+          out := .attributeAdded `instance a :: out
+      for (a,_) in os do
+        if ¬ ns.contains a then
+          out := .attributeRemoved `instance a :: out
+  -- TODO maybe alias
+  -- TODO maybe deprecated
+  -- TODO maybe implementedBy
+  -- TODO maybe export?
+  -- | ``Lean.classExtension => do
+  --     dbg_trace "class"
+  --     dbg_trace (SimplePersistentEnvExtension.getState classExtension new).outParamMap.toList
       -- for (a, b) in SimplePersistentEnvExtension.getState docStringExt new do
       --   if ¬ (SimplePersistentEnvExtension.getState docStringExt old).contains a then
       --     out := .docAdded a :: out
@@ -273,13 +341,16 @@ def diffExtension (old new : Environment)
       -- for (a, _b) in SimplePersistentEnvExtension.getState docStringExt old do
       --   if ¬ (SimplePersistentEnvExtension.getState docStringExt new).contains a then
       --     out := .docRemoved a :: out
-  | `Lean.classExtensin => do
+  | ``Lean.classExtension => do
       -- for mod in [0:old.header.moduleData.size] do
         -- (ext.getModuleEntries old mod)
       -- IO.println (ext.getModuleEntries old mod).size
       for (a, _b) in (classExtension.getState new).outParamMap do
         if ¬ (classExtension.getState old).outParamMap.contains a then
           out := .attributeAdded `class a :: out
+      for (a, _b) in (classExtension.getState old).outParamMap do
+        if ¬ (classExtension.getState new).outParamMap.contains a then
+          out := .attributeRemoved `class a :: out
   | _ => do
     if newEntries.size ≠ oldEntries.size then
     -- m!"-- {ext.name} extension: {(newEntries.size - oldEntries.size : Int)} new entries"
