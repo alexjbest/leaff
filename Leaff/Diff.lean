@@ -119,11 +119,11 @@ inductive Diff : Type
   | removed (name : Name)
   | renamed (oldName newName : Name) (namespaceOnly : Bool)
   | movedToModule (name oldModuleName newModuleName : Name) -- maybe args here
-  | movedWithinModule (name : Name)
   | proofChanged (name : Name) (isProofRelevant : Bool) -- TODO maybe value changed also for defs
   | typeChanged (name : Name)
   | speciesChanged (name : Name) (fro to : String) -- species is axiom, def, thm, opaque, quot, induct, ctor, rec
-  | extensionEntriesModified (ext : Name)
+  | movedWithinModule (name : Name)
+  | extensionEntriesModified (ext : Name) -- TODO maybe delete?
   | docChanged (name : Name) -- TODO how does module/other doc fit in here
   | docAdded (name : Name)
   | docRemoved (name : Name)
@@ -138,6 +138,10 @@ inductive Diff : Type
   | transitiveImportAdded (module importName : Name)
   | transitiveImportRemoved (module importName : Name)
 deriving DecidableEq, Repr
+
+-- what combinations? all pairs?
+-- renamed and proof modified
+-- renamed and moved to module
 
 
 -- TODO maybe variant "optic"s for isBlah that returns all args of blah not just a bool
@@ -450,7 +454,7 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
   --   if const.hasValue && ¬ name.isInternal then (all + 1, ex + 1) else (all + 1, ex)) (0,0) old.constants.map₁)
   -- dbg_trace (all, ex)
   --   old.insert ha <| (old.findD ha #[]).push name) (mkRBMap UInt64 (Array Name) Ord.compare) old.constants.map₁)
-  -- TODO recompute this for mathlib!
+  -- TODO recompute this for mathlib! using current ignores
   -- sz is roughly how many non-internal decls we expect, empirically around 1/5th of total
   let sz := max (new.constants.map₁.size / 5) (old.constants.map₁.size / 5)
 
@@ -487,13 +491,13 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
       if !explained.contains (b.name, true) then
         (hs, co) := hs.insert' (f b old) (b.name, true)
       if co then dbg_trace s!"collision when hashing for {t.id}, all bets are off {b.name}" -- TODO change to err print
-    dbg_trace s!"{t.id}"
-    dbg_trace s!"{hs.toList}"
+    -- dbg_trace s!"{t.id}"
+    -- dbg_trace s!"{hs.toList}"
     for a in afters do
-      if explained.contains (a.name, false) then
-        continue
-      dbg_trace a.name
-      dbg_trace f a new
+      -- if explained.contains (a.name, false) then
+      --   continue
+      -- dbg_trace a.name
+      -- dbg_trace f a new
       if let some (bn, _) := hs.find? (f a new) then
         if t == name then
           out := .renamed bn a.name false :: out -- TODO namespace only?
@@ -510,6 +514,7 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
         if t == species then
           out := .speciesChanged a.name (speciesDescription (new.constants.map₁.find! bn)) (speciesDescription a) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
+          continue
         if t == module then
           out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! a.name).toNat]!
             new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
