@@ -19,6 +19,10 @@ We consider diffs coming from 3 different sources
 - Environment extensions (attributes, docstrings, etc)
 - Imports
 
+## TODO
+- is there a way to include defeq checking in this?
+  for example if a type changes but in a defeq way
+
 -/
 open Lean
 
@@ -35,7 +39,9 @@ structure Trait :=
   [ts : ToString α] -- for debugging
 
 instance : BEq Trait where
-   beq a b := a.id == b.id
+  beq a b := a.id == b.id
+instance : Repr Trait where
+  reprPrec a := reprPrec a.id
 instance {t : Trait} : Hashable t.α := t.ins
 instance {t : Trait} : ToString t.α := t.ts
 
@@ -74,10 +80,16 @@ def module : Trait := Trait.mk' Name (fun c e => e.header.moduleNames[(e.getModu
 
 def relevantTraits : List Trait := [name, type, value, species, module]
 -- TODO maybe find some way to make absence of some traits imply others
+
 @[specialize 1]
 def hashExcept (t : Trait) : ConstantInfo → Environment → UInt64 :=
   (relevantTraits.filter (· != t)).foldl (fun h t c e => mixHash (hash (t.val c e)) (h c e)) (fun _ _ => 7) -- TODO 0 or 7...
 
+@[specialize 1]
+def hashExceptMany (t : List Trait) : ConstantInfo → Environment → UInt64 :=
+  (relevantTraits.filter (!t.contains ·)).foldl (fun h t c e => mixHash (hash (t.val c e)) (h c e)) (fun _ _ => 7) -- TODO 0 or 7...
+
+-- #eval List.sublists [1,2,3]
 -- section testing
 -- def aaaa := 1
 -- def aaab := 1
@@ -444,6 +456,8 @@ def diffHash (c : ConstantInfo) (e : Environment) : UInt64 :=
 relevantTraits.foldl (fun h t => mixHash (hash (t.val c e)) h) 13 -- TODO can we get rid of initial value here?
 -- mixHash (hash <| module.val c e) <| mixHash (hash <| species.val c e) <| mixHash (hash <| name.val c e) <| mixHash (type.val c e |>.hash) (value.val c e |>.hash)
 
+/-- the list of trait combinations used below -/
+def traitCombinations : List (List Trait):= [[name],[value],[name, value],[type],[type, value],[name, value, module],[type, value, module],[species],[module]]
 def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace new.header.moduleNames
   -- dbg_trace new.header.moduleData[2]!.imports
@@ -482,15 +496,16 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- TODO could use hashset here for explained
   let mut out : List Diff := []
   let mut explained : HashSet (Name × Bool) := HashSet.empty
-  for t in relevantTraits do -- TODO end user should be able to customize which traits
-    let f := t.hashExcept
+  for t in traitCombinations.toArray.qsort (fun a b => a.length < b.length) do -- TODO end user should be able to customize which traits
+    let f := hashExceptMany t
     let mut hs : HashMap UInt64 (Name × Bool) := HashMap.empty
     let mut co := true
     -- TODO actually check trait differences when found here!?
     for b in befores do
+      let a := hs.findEntry? (f b old)
       if !explained.contains (b.name, true) then
         (hs, co) := hs.insert' (f b old) (b.name, true)
-      if co then dbg_trace s!"collision when hashing for {t.id}, all bets are off {b.name}" -- TODO change to err print
+        if co then dbg_trace s!"collision when hashing for {t.map Trait.id}, all bets are off {b.name} {a.get!.2}" -- TODO change to err print
     -- dbg_trace s!"{t.id}"
     -- dbg_trace s!"{hs.toList}"
     for a in afters do
@@ -498,27 +513,52 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
       --   continue
       -- dbg_trace a.name
       -- dbg_trace f a new
+      -- [name, type, value, species, module] -- TODO check order
       if let some (bn, _) := hs.find? (f a new) then
-        if t == name then
+        if t == [name] then
           out := .renamed bn a.name false :: out -- TODO namespace only?
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
-        if t == value then
+        if t == [value] then
           out := .proofChanged a.name false :: out -- TODO check if proof relevant
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
-        if t == type then
+        if t == [name, value] then
+          out := .renamed bn a.name false :: out -- TODO namespace only?
+          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
+          continue
+        if t == [type] then -- this is very unlikely?
           out := .typeChanged a.name :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
-        if t == species then
+        if t == [type, value] then
+          out := .typeChanged a.name :: out
+          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
+        if t == [name, value, module] then
+          out := .renamed bn a.name false :: out -- TODO namespace only?
+          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! bn).toNat]!
+            new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
+          continue
+        if t == [type, value, module] then
+          out := .typeChanged a.name :: out
+          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! bn).toNat]!
+            new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
+          explained := explained.insert (a.name, false) |>.insert (bn, true)
+          continue
+        if t == [species] then
           out := .speciesChanged a.name (speciesDescription (new.constants.map₁.find! bn)) (speciesDescription a) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
-        if t == module then
+        if t == [module] then
           out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! a.name).toNat]!
             new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
+          continue
   for a in afters do
     if !explained.contains (a.name, false) then out := .added a.name :: out
   for b in befores do
