@@ -9,7 +9,7 @@ Nevertheless at the moment it does at least provide some potentially useful outp
 
 
 ```diff
-$ lake exe leaff Mathlib $(tr ':' ',' <<<"$(eval $(lake --dir ../test-mathlib2/ env) && echo $LEAN_PATH)") $(tr ':' ',' <<<"$(eval $(lake --dir ../test-mathlib/ env) && echo $LEAN_PATH)")
+$ ./runleaff.sh Mathlib ../test-mathlib2/ ../test-mathlib/
 Found differences:
 + added Affine.Simplex.coe_orthogonalProjection_vadd_smul_vsub_orthogonalProjection
 + added Affine.Simplex.dist_sq_eq_dist_orthogonalProjection_sq_add_dist_orthogonalProjection_sq
