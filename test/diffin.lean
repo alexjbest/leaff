@@ -5,6 +5,7 @@ def foo := 1
 diff in
 theorem foo' : 1 = 1 := rfl
 
+-- note that this finds what changed in `section`, so nothing
 diff in
 section
 def asd := 1

@@ -1,5 +1,5 @@
 import Lean
-import Leaff.Deriving.Optics
+-- import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
 import Std.Lean.HashMap
@@ -104,7 +104,7 @@ def hashExceptMany (t : List Trait) : ConstantInfo → Environment → UInt64 :=
 end Trait
 
 
-/--
+/-
 Copied from mathlib:
 Lean 4 makes declarations which are technically not internal
 (that is, head string does not start with `_`) but which sometimes should
@@ -114,11 +114,11 @@ This might be better fixed in core, but until then, this method can act
 as a polyfill. This method only looks at the name to decide whether it is probably internal.
 Note: this declaration also occurs as `shouldIgnore` in the Lean 4 file `test/lean/run/printDecls`.
 -/
-def Lean.Name.isInternal' (declName : Name) : Bool :=
-  declName.isInternal ||
-  match declName with
-  | .str _ s => "match_".isPrefixOf s || "proof_".isPrefixOf s
-  | _        => true
+-- def Lean.Name.isInternal' (declName : Name) : Bool :=
+--   declName.isInternal ||
+--   match declName with
+--   | .str _ s => "match_".isPrefixOf s || "proof_".isPrefixOf s
+--   | _        => true
 -- TODO maybe isBlackListed from mathlib instead? or something else that removes mk.inj and sizeOf_spec
 
 open Lean
@@ -158,7 +158,7 @@ deriving DecidableEq, Repr
 
 -- TODO maybe variant "optic"s for isBlah that returns all args of blah not just a bool
 -- set_option trace.derive_optics true
-derive_optics Diff
+-- derive_optics Diff
 
 namespace Diff
 /-- Priority for displaying diffs, lower numbers are more important and should come first in the output.
@@ -197,38 +197,38 @@ open Std
 -- especially for the diffs command
 -- TODO group by module name using @@module@@
 open ToFormat in
-def summarize (diffs : List Diff) : Format := Id.run do
+def summarize (diffs : List Diff) : MessageData := Id.run do
   if diffs = [] then return "No differences found."
-  let mut out : Format := ("Found differences:" : Format).append .line
+  let mut out : MessageData := ("Found differences:" : MessageData).compose Format.line
   let mut diffs := diffs.toArray
   diffs := diffs.qsort (fun a b => a.prio < b.prio)
   for d in diffs do
-    out := out.append <| match d with
-      | .added name                                     => format s!"+ added {name}\n"
-      | .removed name                                   => format s!"- removed {name}\n"
-      | .renamed oldName newName true                   => format s!"! renamed {oldName} → {newName} (changed namespace)\n"
-      | .renamed oldName newName false                  => format s!"! renamed {oldName} → {newName}\n"
-      | .movedToModule name oldModuleName newModuleName => format s!"! moved {name} from {oldModuleName} to {newModuleName}\n"
-      | .movedWithinModule name                         => format s!"! moved {name} within module\n"
-      | .proofChanged name true                         => format s!"! value changed for {name}\n"
-      | .proofChanged name false                        => format s!"! proof changed for {name}\n"
-      | .typeChanged name                               => format s!"! type changed for {name}\n"
-      | .speciesChanged name fro to                     => format s!"! {name} changed from {fro} to {to}\n"
-      | .extensionEntriesModified ext                   => format s!"! extension entry modified for {ext}\n"
-      | .docChanged name                                => format s!"! doc modified for {name}\n"
-      | .docAdded name                                  => format s!"+ doc added to {name}\n"
-      | .docRemoved name                                => format s!"- doc removed from {name}\n"
-      | .moduleAdded name                               => format s!"+ module added {name}\n"
-      | .moduleRemoved name                             => format s!"- module removed {name}\n"
-      | .moduleRenamed oldName newName                  => format s!"! module renamed {oldName} → {newName}\n"
-      | .attributeAdded attrName name                   => format s!"+ attribute {attrName} added to {name}\n"
-      | .attributeRemoved attrName name                 => format s!"- attribute {attrName} removed from {name}\n"
-      | .attributeChanged attrName name                 => format s!"! attribute {attrName} changed for {name}\n"
-      | .directImportAdded module importName            => format s!"+ direct import {importName} added to {module}\n"
-      | .directImportRemoved module importName          => format s!"- direct import {importName} removed from {module}\n"
-      | .transitiveImportAdded module importName        => format s!"+ transitive import {importName} added to {module}\n"
-      | .transitiveImportRemoved module importName      => format s!"- transitive import {importName} removed from {module}\n"
-  out := out.append (format s!"{diffs.size} differences")
+    out := out.compose <| match d with
+      | .added name                                     => m!"+ added {Expr.const name []}\n"
+      | .removed name                                   => m!"- removed {name}\n"
+      | .renamed oldName newName true                   => m!"! renamed {oldName} → {newName} (changed namespace)\n"
+      | .renamed oldName newName false                  => m!"! renamed {oldName} → {newName}\n"
+      | .movedToModule name oldModuleName newModuleName => m!"! moved {name} from {oldModuleName} to {newModuleName}\n"
+      | .movedWithinModule name                         => m!"! moved {name} within module\n"
+      | .proofChanged name true                         => m!"! value changed for {name}\n"
+      | .proofChanged name false                        => m!"! proof changed for {name}\n"
+      | .typeChanged name                               => m!"! type changed for {name}\n"
+      | .speciesChanged name fro to                     => m!"! {name} changed from {fro} to {to}\n"
+      | .extensionEntriesModified ext                   => m!"! extension entry modified for {ext}\n"
+      | .docChanged name                                => m!"! doc modified for {name}\n"
+      | .docAdded name                                  => m!"+ doc added to {name}\n"
+      | .docRemoved name                                => m!"- doc removed from {name}\n"
+      | .moduleAdded name                               => m!"+ module added {name}\n"
+      | .moduleRemoved name                             => m!"- module removed {name}\n"
+      | .moduleRenamed oldName newName                  => m!"! module renamed {oldName} → {newName}\n"
+      | .attributeAdded attrName name                   => m!"+ attribute {attrName} added to {name}\n"
+      | .attributeRemoved attrName name                 => m!"- attribute {attrName} removed from {name}\n"
+      | .attributeChanged attrName name                 => m!"! attribute {attrName} changed for {name}\n"
+      | .directImportAdded module importName            => m!"+ direct import {importName} added to {module}\n"
+      | .directImportRemoved module importName          => m!"- direct import {importName} removed from {module}\n"
+      | .transitiveImportAdded module importName        => m!"+ transitive import {importName} added to {module}\n"
+      | .transitiveImportRemoved module importName      => m!"- transitive import {importName} removed from {module}\n"
+  out := out.compose (format s!"{diffs.size} differences")
   pure out
 
 end Diff
@@ -605,8 +605,7 @@ def extractRenames (diffs : List Diff) : NameMap Name := Id.run do
     | _ => pure ()
   pure out
 
--- TODO some sort of minimization pass might be needed?
--- TODO make this not IO and pass exts in
+-- TODO make this not IO and pass exts in, perhaps
 def diff (old new : Environment) : IO (List Diff) := do
   let cd := constantDiffs old new
   let renames := extractRenames cd
@@ -618,7 +617,6 @@ def diff (old new : Environment) : IO (List Diff) := do
 end Lean.Environment
 
 -- TODO need some logic for checking lean versions agree otherwise we are in a world of hurt
--- TODO rename to old new
 unsafe
 def summarizeDiffImports (oldImports newImports : Array Import) (old new : SearchPath) : IO Unit := timeit "total" <| do
   searchPathRef.set old
@@ -626,12 +624,10 @@ def summarizeDiffImports (oldImports newImports : Array Import) (old new : Searc
   let trustLevel := 1024 -- TODO actually think about this value
   withImportModules oldImports opts trustLevel fun oldEnv => do
     -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
-    -- to reduce the need for multiple checkouts, but that seems compilicated
+    -- to reduce the need for multiple checkouts, but that seems complicated
     searchPathRef.set new
     withImportModules newImports opts trustLevel fun newEnv => do
-      IO.println <| Diff.summarize (← oldEnv.diff newEnv)
-
-
+      IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
 
 section cmd
 
@@ -651,7 +647,7 @@ elab "diff " "in" ppLine cmd:command : command => do
 
 /-- `diffs in $command` executes a sequence of commands and then prints the
 environment diff -/
-elab "diffs " "in" ppLine cmd:command* ("end " "diffs")? : command => do
+elab "diffs " "in" ppLine cmd:command* ("end diffs")? : command => do
   let oldEnv ← getEnv
   try
     for cmd in cmd do
@@ -659,4 +655,5 @@ elab "diffs " "in" ppLine cmd:command* ("end " "diffs")? : command => do
   finally
     let newEnv ← getEnv
     logInfo (Diff.summarize <| ← oldEnv.diff newEnv)
+
 end cmd
