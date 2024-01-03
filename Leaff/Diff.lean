@@ -194,6 +194,7 @@ open Std
 -- TODO can we make the output richer,
 -- colours (sort of handled by diff format in github)
 -- links / messagedata in the infoview maybe extracted as links somehow
+-- especially for the diffs command
 -- TODO group by module name using @@module@@
 open ToFormat in
 def summarize (diffs : List Diff) : Format := Id.run do
@@ -263,6 +264,8 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace new.header.moduleData[2]!.imports
   pure out
 
+
+-- TODO enable current file diffs in extension diffs
 
 namespace MapDeclarationExtension
 
@@ -465,33 +468,36 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- let oldhashes := (HashMap.fold (fun old name const =>
   --   let ha := (diffHash const)
   -- let (all, ex) := (HashMap.fold (fun (all, ex) name const =>
-  --   if const.hasValue && ¬ name.isInternal then (all + 1, ex + 1) else (all + 1, ex)) (0,0) old.constants.map₁)
+  --   if const.hasValue && ¬ name.isInternal then (all + 1, ex + 1) else (all + 1, ex)) (0,0) old.constants)
   -- dbg_trace (all, ex)
-  --   old.insert ha <| (old.findD ha #[]).push name) (mkRBMap UInt64 (Array Name) Ord.compare) old.constants.map₁)
+  --   old.insert ha <| (old.findD ha #[]).push name) (mkRBMap UInt64 (Array Name) Ord.compare) old.constants)
   -- TODO recompute this for mathlib! using current ignores
   -- sz is roughly how many non-internal decls we expect, empirically around 1/5th of total
-  let sz := max (new.constants.map₁.size / 5) (old.constants.map₁.size / 5)
+  let sz := max (new.constants.size / 5) (old.constants.size / 5)
 
   -- first we make a hashmap of all decls, hashing with `diffHash`, this should cut the space of "interesting" decls down drastically
   -- TODO reconsider internals, how useful are they
-  -- note everything should be in map₁ as we loaded from file
-  let oldhashes := HashMap.fold (fun old name const =>
-    if const.hasValue && ¬ name.isInternalDetail then old.insert name else old) (@mkHashSet Name _ ⟨fun n => diffHash (old.constants.map₁.find! n) old⟩ sz) old.constants.map₁
-  dbg_trace "hashes1 made"
-  let newhashes := HashMap.fold (fun old name const =>
-    if const.hasValue && ¬ name.isInternalDetail then old.insert name else old) (@mkHashSet Name _ ⟨fun n => diffHash (new.constants.map₁.find! n) new⟩ sz) new.constants.map₁
-  dbg_trace "hashes2 made"
+  let oldhashes := old.constants.fold
+    (fun old name const =>
+      if const.hasValue && ¬ name.isInternalDetail then old.insert name else old)
+    (@mkHashSet Name _ ⟨fun n => diffHash (old.constants.find! n) old⟩ sz)
+  -- dbg_trace "hashes1 made"
+  let newhashes := new.constants.fold
+    (fun old name const =>
+      if const.hasValue && ¬ name.isInternalDetail then old.insert name else old)
+    (@mkHashSet Name _ ⟨fun n => diffHash (new.constants.find! n) new⟩ sz)
+  -- dbg_trace "hashes2 made"
   -- out := out ++ (newnames.sdiff oldnames).toList.map .added
   -- out := out ++ (oldnames.sdiff newnames).toList.map .removed
   -- dbg_trace out.length
   -- dbg_trace (HashSet.sdiff oldhashes newhashes).toList
   let diff := (HashSet.sdiff oldhashes newhashes).toArray
-  dbg_trace "diffs made"
-  let befores := diff.filterMap (fun (di, bef) => if bef then some (old.constants.map₁.find! di) else none)
-  let afters := diff.filterMap (fun (di, bef) => if bef then none else some (new.constants.map₁.find! di))
+  -- dbg_trace "diffs made"
+  let befores := diff.filterMap (fun (di, bef) => if bef then some (old.constants.find! di) else none)
+  let afters := diff.filterMap (fun (di, bef) => if bef then none else some (new.constants.find! di))
   -- dbg_trace befores.map ConstantInfo.name
   -- dbg_trace afters.map ConstantInfo.name
-  dbg_trace afters.size
+  -- dbg_trace afters.size
   -- -- dbg_trace dm.map (fun (c, rem) => (c.name, rem))
   -- TODO could use hashset here for explained
   let mut out : List Diff := []
@@ -551,7 +557,7 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [species] then
-          out := .speciesChanged a.name (speciesDescription (new.constants.map₁.find! bn)) (speciesDescription a) :: out
+          out := .speciesChanged a.name (speciesDescription (new.constants.find! bn)) (speciesDescription a) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [module] then
@@ -624,3 +630,33 @@ def summarizeDiffImports (oldImports newImports : Array Import) (old new : Searc
     searchPathRef.set new
     withImportModules newImports opts trustLevel fun newEnv => do
       IO.println <| Diff.summarize (← oldEnv.diff newEnv)
+
+
+
+section cmd
+
+open Lean Elab Command
+
+-- implementation based on whatsnew by Gabriel Ebner
+
+/-- `diff in $command` executes the command and then prints the
+environment diff -/
+elab "diff " "in" ppLine cmd:command : command => do
+  let oldEnv ← getEnv
+  try
+    elabCommand cmd
+  finally
+    let newEnv ← getEnv
+    logInfo (Diff.summarize <| ← oldEnv.diff newEnv)
+
+/-- `diffs in $command` executes a sequence of commands and then prints the
+environment diff -/
+elab "diffs " "in" ppLine cmd:command* ("end " "diffs")? : command => do
+  let oldEnv ← getEnv
+  try
+    for cmd in cmd do
+      elabCommand cmd
+  finally
+    let newEnv ← getEnv
+    logInfo (Diff.summarize <| ← oldEnv.diff newEnv)
+end cmd
