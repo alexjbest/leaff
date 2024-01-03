@@ -1,12 +1,22 @@
 Leaff
 =====
 
-Leaff is a diff tool for Lean environments. It aims to produce a human readable summary of the differences between two versions of the same Lean module stored in olean files. For example it can be used to detect unexpected changes to, or removal of, theorems when a refactor is carried out in a large library.
+Leaff is a diff tool for Lean environments. It aims to produce a human readable summary of the differences between two versions of the same Lean module (for instance coming from olean files from two different revisions to the same library). For example it can be used to detect unexpected changes to, or removal of, theorems when a refactor is carried out in a large library. Or it can be useful to simply summarize the diff of a proposed inclusion with the more likely to be interesting information presented first.
 
 It is currently under development and should be considered version alpha (contributions welcome!).
-It is not currently particularly user friendly, though it is at least fast enough to run on the scale of `mathlib`.
-Nevertheless at the moment it does at least provide some potentially useful output e.g.
+Nevertheless at the moment it does at least provide some potentially useful output
+and it is at least fast enough to run on the scale of `mathlib`.
 
+Usage
+-----
+
+The main entrypoint is the script `runleaff.sh` to use it you should check out two copies of your project, one for the old version of the library and one for the new (e.g. with `git worktree add ../old/ some-other-branch`) then navigate to the Leaff directory and run
+```
+./runleaff.sh ModuleName /path/to/old-version/ /path/to/new-version/
+```
+note that the module name will likely just be the name of the library (e.g. `Mathlib`) if want to know all potential downstream changes of some change, but could be more specific, e.g. `MyLibrary.SomeFile`. The paths could be relative to the Leaff directory or absolute.
+
+You may face many issues, especially if the diff is too big, if there are different Lean versions use in the libraries, or if there is a different Lean version used to compile the libraries and Leaff itself.
 
 ```diff
 $ ./runleaff.sh Mathlib ../test-mathlib2/ ../test-mathlib/
