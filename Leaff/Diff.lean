@@ -236,7 +236,10 @@ def summarize (diffs : List Diff) : MessageData := Id.run do
   if diffs == [] then return "No differences found."
   let mut out : MessageData := "Found differences:" ++ Format.line
   let mut diffs := diffs.toArray
-  diffs := diffs.qsort (fun a b => a.prio < b.prio)
+  let _inst : Ord Name := ⟨Name.quickCmp⟩
+  let _inst : Ord (Nat × Name) := lexOrd
+  let _inst : LT (Nat × Name) := ltOfOrd
+  diffs := diffs.qsort (fun a b => (a.prio, a.mod) < (b.prio, b.mod))
   let mut oldmod : Name := Name.anonymous
   for d in diffs do
     let mod := d.mod
@@ -245,6 +248,7 @@ def summarize (diffs : List Diff) : MessageData := Id.run do
       out := out ++ m!"@@ {mod} @@\n"
     out := out ++ (match d with
       -- TODO add expr to all of these
+      -- TODO see if universe printing can be disabled
       | .added const _                                  => m!"+ added {Expr.const const.name (const.levelParams.map mkLevelParam)}"
       | .removed name _                                 => m!"- removed {Expr.const name []}"
       | .renamed oldName newName true _                 => m!"! renamed {oldName} → {newName} (changed namespace)"
@@ -669,12 +673,15 @@ def summarizeDiffImports (oldImports newImports : Array Import) (old new : Searc
   searchPathRef.set old
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
-  withImportModules oldImports opts trustLevel fun oldEnv => do
-    -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
-    -- to reduce the need for multiple checkouts, but that seems complicated
-    searchPathRef.set new
-    withImportModules newImports opts trustLevel fun newEnv => do
-      IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
+  try
+    withImportModules oldImports opts trustLevel fun oldEnv => do
+      -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
+      -- to reduce the need for multiple checkouts, but that seems complicated
+      searchPathRef.set new
+      withImportModules newImports opts trustLevel fun newEnv => do
+        IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
+  catch ex => do
+    throw <| IO.userError s!"Exception: {← ex.toMessageData.toString}"
 
 section cmd
 
