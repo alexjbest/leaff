@@ -673,15 +673,12 @@ def summarizeDiffImports (oldImports newImports : Array Import) (old new : Searc
   searchPathRef.set old
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
-  try
-    withImportModules oldImports opts trustLevel fun oldEnv => do
-      -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
-      -- to reduce the need for multiple checkouts, but that seems complicated
-      searchPathRef.set new
-      withImportModules newImports opts trustLevel fun newEnv => do
-        IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
-  catch ex => do
-    throw <| IO.userError s!"Exception: {← ex.toMessageData.toString}"
+  withImportModules oldImports opts trustLevel fun oldEnv => do
+    -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
+    -- to reduce the need for multiple checkouts, but that seems complicated
+    searchPathRef.set new
+    withImportModules newImports opts trustLevel fun newEnv => do
+      IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
 
 section cmd
 
