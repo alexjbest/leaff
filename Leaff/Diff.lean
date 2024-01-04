@@ -2,7 +2,7 @@ import Lean
 -- import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
-import Std.Lean.HashMap
+-- import Std.Lean.HashMap
 
 
 /-!
@@ -25,6 +25,12 @@ We consider diffs coming from 3 different sources
 
 -/
 open Lean
+
+-- TODO upstream??
+def moduleName (env : Environment) (n : Name) : Name :=
+match env.getModuleIdxFor? n with
+| some modIdx => env.allImportedModuleNames[modIdx.toNat]!
+| none => env.mainModule
 
 /--
 Traits are functions from `ConstantInfo` to some hashable type `α` that when changed,
@@ -73,7 +79,7 @@ def speciesDescription : ConstantInfo → String
   | .ctorInfo _ => "ctor"
   | .recInfo _ => "rec"
 
-def module : Trait := Trait.mk' Name (fun c e => e.header.moduleNames[(e.getModuleIdxFor? c.name).get!.toNat]!)
+def module : Trait := Trait.mk' Name (fun c e => moduleName e c.name)
 
 -- TODO add universe vars trait? possibly already covered by type
 -- TODO maybe def safety as a trait?
@@ -216,14 +222,14 @@ def mod : Diff → Name
   | .moduleRemoved m
   | .attributeAdded _ _ m
   | .attributeRemoved _ _ m
+  | .directImportAdded m _
+  | .directImportRemoved m _
+  | .movedToModule _ _ m
+  | .moduleRenamed _ m
+  | .transitiveImportAdded m _
+  | .transitiveImportRemoved m _
   | .attributeChanged _ _ m => m
-  | .movedToModule _ _ _
-  | .moduleRenamed _ _
-  | .extensionEntriesModified _
-  | .directImportAdded _ _
-  | .directImportRemoved _ _
-  | .transitiveImportAdded _ _
-  | .transitiveImportRemoved _ _ => Name.anonymous
+  | .extensionEntriesModified _ => Name.anonymous
 
 open Std
 
@@ -311,12 +317,11 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
   pure out
 
 
--- TODO enable current file diffs in extension diffs
-
 namespace MapDeclarationExtension
 
 def getImportedState [Inhabited α] (ext : MapDeclarationExtension α) (env : Environment) : NameMap α :=
-RBMap.fromArray (ext.toEnvExtension.getState env).importedEntries.flatten Name.quickCmp
+RBMap.fromArray ((ext.getEntries env).toArray ++ (ext.toEnvExtension.getState env).importedEntries.flatten) Name.quickCmp
+
   -- match env.getModuleIdxFor? declName with
   -- | some modIdx =>
   --   match (modIdx).binSearch (declName, default) (fun a b => Name.quickLt a.1 b.1) with
@@ -328,16 +333,32 @@ end MapDeclarationExtension
 namespace TagDeclarationExtension
 
 def getImportedState (ext : TagDeclarationExtension) (env : Environment) : NameSet :=
-RBTree.fromArray (ext.toEnvExtension.getState env).importedEntries.flatten Name.quickCmp
+RBTree.fromArray ((ext.getEntries env).toArray ++ (ext.toEnvExtension.getState env).importedEntries.flatten) Name.quickCmp
 
 end TagDeclarationExtension
 
 namespace SimpleScopedEnvExtension
 
-def getImportedState [Inhabited σ] (ext : SimpleScopedEnvExtension α σ) (env : Environment) : σ :=
+def getImportedState [Inhabited σ] (ext : ScopedEnvExtension α β σ) (env : Environment) : σ :=
 ext.getState env
 
 end SimpleScopedEnvExtension
+namespace Leaff.Lean.HashMap
+
+
+variable [BEq α] [Hashable α]
+/-- copied from Std, we copy rather than importing to reduce the std dependency
+and make changing the Lean version used by Leaff easier (hopefully) -/
+instance : ForIn m (HashMap α β) (α × β) where
+  forIn m init f := do
+    let mut acc := init
+    for buckets in m.val.buckets.val do
+      for d in buckets do
+        match ← f d acc with
+        | .done b => return b
+        | .yield b => acc := b
+    return acc
+end Leaff.Lean.HashMap
 
 -- TODO upstream
 instance [BEq α] [Hashable α] : ForIn m (SMap α β) (α × β) where
@@ -349,18 +370,13 @@ deriving instance BEq for DeclarationRanges
 
 open private docStringExt in Lean.findDocString?
 
--- TODO upstream??
-def moduleName (env : Environment) (n : Name) : Name :=
-match env.getModuleIdxFor? n with
-| some modIdx => env.allImportedModuleNames[modIdx.toNat]!
-| none => env.mainModule
-
 /-- Take the diff between an old and new state of some environment extension,
 at the moment we hardcode the extensions we are interested in, as it is not clear how we can go beyond that. -/
 def diffExtension (old new : Environment)
     (ext : PersistentEnvExtension EnvExtensionEntry EnvExtensionEntry EnvExtensionState)
     (renames : NameMap Name)
-    (revRenames : NameMap Name) :
+    (revRenames : NameMap Name)
+    (ignoreInternal : Bool := true) :
     IO (List Diff) := do
   -- let oldSt := ext.getState old
   -- let newSt := ext.getState new
@@ -380,79 +396,86 @@ def diffExtension (old new : Environment)
       let os := MapDeclarationExtension.getImportedState declRangeExt old
       let ns := MapDeclarationExtension.getImportedState declRangeExt new
       for (a, b) in ns do
-        if !a.isInternalDetail then continue
+        if ignoreInternal && a.isInternalDetail then continue
         if os.find? (revRenames.findD a a) != b then
           out := .movedWithinModule a (moduleName new a) :: out
-  | `Lean.docStringExt => do -- Note this is `` not `, as docStringExt is actually private
+  | `Lean.docStringExt => do -- Note this is ` not ``, as docStringExt is actually private
       let os := MapDeclarationExtension.getImportedState docStringExt old
       let ns := MapDeclarationExtension.getImportedState docStringExt new
       for (a, doc) in ns do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ os.contains (revRenames.findD a a) then
+        if ! os.contains (revRenames.findD a a) then
           out := .docAdded a (moduleName new a) :: out
         else
           if os.find! (revRenames.findD a a) != doc then
             out := .docChanged a (moduleName new a) :: out
       for (a, _b) in os do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ ns.contains (renames.findD a a) then
+        if ! ns.contains (renames.findD a a) then
           out := .docRemoved (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.protectedExt => do
       let os := TagDeclarationExtension.getImportedState protectedExt old
       let ns := TagDeclarationExtension.getImportedState protectedExt new
       for a in ns do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ os.contains (revRenames.findD a a) then
+        if ! os.contains (revRenames.findD a a) then
           out := .attributeAdded `protected a (moduleName new a) :: out
       for a in os do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ ns.contains (renames.findD a a) then
+        if ! ns.contains (renames.findD a a) then
           out := .attributeRemoved `protected (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.noncomputableExt => do
       let os := TagDeclarationExtension.getImportedState noncomputableExt old
       let ns := TagDeclarationExtension.getImportedState noncomputableExt new
       for a in ns do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ os.contains (revRenames.findD a a) then
+        if ! os.contains (revRenames.findD a a) then
           out := .attributeAdded `noncomputable a (moduleName new a) :: out
       for a in os do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ ns.contains (renames.findD a a) then
+        if ! ns.contains (renames.findD a a) then
           out := .attributeRemoved `noncomputable (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.Meta.globalInstanceExtension => do -- TODO test this, is this the relevant ext?
       let os := Lean.Meta.globalInstanceExtension.getState old
       let ns := Lean.Meta.globalInstanceExtension.getState new
       for (a, _) in ns do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ os.contains (revRenames.findD a a) then
+        if ! os.contains (revRenames.findD a a) then
           out := .attributeAdded `instance a (moduleName new a) :: out
       for (a, _) in os do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ ns.contains (renames.findD a a) then
+        if ! ns.contains (renames.findD a a) then
           out := .attributeRemoved `instance (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   -- TODO maybe alias
   -- TODO maybe deprecated
   -- TODO maybe implementedBy
   -- TODO maybe export?
+  -- declrange (maybe as an option)
+  -- simp
+  -- computable markers?
+  -- coe?
+  -- reducible?
+  -- namespaces?
+  -- docString, moduleDoc
   -- | ``Lean.classExtension => do
   --     dbg_trace "class"
   --     dbg_trace (SimplePersistentEnvExtension.getState classExtension new).outParamMap.toList
       -- for (a, b) in SimplePersistentEnvExtension.getState docStringExt new do
-      --   if ¬ (SimplePersistentEnvExtension.getState docStringExt old).contains a then
+      --   if ! (SimplePersistentEnvExtension.getState docStringExt old).contains a then
       --     out := .docAdded a :: out
       --   else
       --     if (SimplePersistentEnvExtension.getState docStringExt old).find! a != b then
       --       out := .docChanged a :: out
       -- for (a, _b) in SimplePersistentEnvExtension.getState docStringExt old do
-      --   if ¬ (SimplePersistentEnvExtension.getState docStringExt new).contains a then
+      --   if ! (SimplePersistentEnvExtension.getState docStringExt new).contains a then
       --     out := .docRemoved a :: out
   | ``Lean.classExtension => do
       let os := classExtension.getState old
@@ -461,14 +484,14 @@ def diffExtension (old new : Environment)
         -- (ext.getModuleEntries old mod)
       -- IO.println (ext.getModuleEntries old mod).size
       for (a, _b) in ns.outParamMap do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ os.outParamMap.contains (revRenames.findD a a) then
+        if ! os.outParamMap.contains (revRenames.findD a a) then
           out := .attributeAdded `class a (moduleName new a) :: out
       for (a, _b) in os.outParamMap do
-        if a.isInternalDetail then
+        if ignoreInternal && a.isInternalDetail then
           continue
-        if ¬ ns.outParamMap.contains (renames.findD a a) then
+        if ! ns.outParamMap.contains (renames.findD a a) then
           out := .attributeRemoved `class (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | _ => pure ()
     -- if newEntries.size ≠ oldEntries.size then
@@ -476,20 +499,7 @@ def diffExtension (old new : Environment)
     --   out := .extensionEntriesModified ext.name :: out
   return out
 
--- Which extensions do we care about?
--- all??
--- class (maybe not)
--- instance
--- declrange (maybe as an option)
--- simp
--- computable markers?
--- coe?
--- reducible?
--- protected
--- namespaces?
--- docString, moduleDoc
-
-def extDiffs (old new : Environment) (renames : NameMap Name) : IO (List Diff) := do
+def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : Bool := true) : IO (List Diff) := do
   let mut out : List Diff := []
   let mut revRenames := mkNameMap Name
   for (o, n) in renames do
@@ -498,10 +508,14 @@ def extDiffs (old new : Environment) (renames : NameMap Name) : IO (List Diff) :
   -- dbg_trace old.extensions.size
   for ext in ← persistentEnvExtensionsRef.get do
     -- dbg_trace ext.name
-    out := (← diffExtension old new ext renames revRenames) ++ out
+    out := (← diffExtension old new ext renames revRenames ignoreInternal) ++ out
   -- let oldexts := RBSet.ofList (old.extensions Prod.fst) Name.cmp -- TODO maybe quickCmp
   -- let newexts := RBSet.ofList (new.constants.map₁.toList.map Prod.fst) Name.cmp -- TODO maybe quickCmp
   pure out
+
+  -- #check reducibilityAttrs
+
+
 
 open Trait
 
@@ -513,32 +527,34 @@ relevantTraits.foldl (fun h t => mixHash (hash (t.val c e)) h) 13 -- TODO can we
 
 /-- the list of trait combinations used below -/
 def traitCombinations : List (List Trait) := [[name],[value],[name, value],[type],[type, value],[name, value, module],[type, value, module],[species],[module]]
-def constantDiffs (old new : Environment) : List Diff := Id.run do
+def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List Diff := Id.run do
   -- dbg_trace new.header.moduleNames
   -- dbg_trace new.header.moduleData[2]!.imports
   -- TODO should we use rbmap or hashmap?
   -- let oldhashes := (HashMap.fold (fun old name const =>
   --   let ha := (diffHash const)
   -- let (all, ex) := (HashMap.fold (fun (all, ex) name const =>
-  --   if const.hasValue && ¬ name.isInternal then (all + 1, ex + 1) else (all + 1, ex)) (0,0) old.constants)
+  --   if const.hasValue && ! name.isInternal then (all + 1, ex + 1) else (all + 1, ex)) (0,0) old.constants)
   -- dbg_trace (all, ex)
   --   old.insert ha <| (old.findD ha #[]).push name) (mkRBMap UInt64 (Array Name) Ord.compare) old.constants)
   -- TODO recompute this for mathlib! using current ignores
   -- sz is roughly how many non-internal decls we expect, empirically around 1/5th of total
+  -- TODO change if internals included
   let sz := max (new.constants.size / 5) (old.constants.size / 5)
 
   -- first we make a hashmap of all decls, hashing with `diffHash`, this should cut the space of "interesting" decls down drastically
   -- TODO reconsider internals, how useful are they
+  -- dbg_trace "making hashes"
   let oldhashes := old.constants.fold
     (fun old name const =>
-      if const.hasValue && ¬ name.isInternalDetail then old.insert name else old)
+      if const.hasValue && (!ignoreInternal || !name.isInternalDetail) then old.insert name else old)
     (@mkHashSet Name _ ⟨fun n => diffHash (old.constants.find! n) old⟩ sz)
   -- dbg_trace "hashes1 made"
   let newhashes := new.constants.fold
     (fun old name const =>
-      if const.hasValue && ¬ name.isInternalDetail then old.insert name else old)
+      if const.hasValue && (!ignoreInternal || !name.isInternalDetail) then old.insert name else old)
     (@mkHashSet Name _ ⟨fun n => diffHash (new.constants.find! n) new⟩ sz)
-  -- dbg_trace "hashes2 made"
+  -- dbg_trace "hash2 made"
   -- out := out ++ (newnames.sdiff oldnames).toList.map .added
   -- out := out ++ (oldnames.sdiff newnames).toList.map .removed
   -- dbg_trace out.length
@@ -547,6 +563,7 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace "diffs made"
   let befores := diff.filterMap (fun (di, bef) => if bef then some (old.constants.find! di) else none)
   let afters := diff.filterMap (fun (di, bef) => if bef then none else some (new.constants.find! di))
+  -- dbg_trace "bas made"
   -- dbg_trace befores.map ConstantInfo.name
   -- dbg_trace afters.map ConstantInfo.name
   -- dbg_trace afters.size
@@ -615,6 +632,7 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
           out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
+  dbg_trace "final"
   for a in afters do
     if !explained.contains (a.name, false) then out := .added a (moduleName new a.name) :: out
   for b in befores do
@@ -657,28 +675,36 @@ def extractRenames (diffs : List Diff) : NameMap Name := Id.run do
   pure out
 
 -- TODO make this not IO and pass exts in, perhaps
-def diff (old new : Environment) : IO (List Diff) := do
-  let cd := constantDiffs old new
+def diff (old new : Environment) (ignoreInternal : Bool := true) : IO (List Diff) := do
+  let cd := constantDiffs old new ignoreInternal
   let renames := extractRenames cd
   pure <|
     minimizeDiffs <| cd ++
     importDiffs old new ++
-    (← extDiffs old new renames)
+    (← extDiffs old new renames ignoreInternal)
 
 end Lean.Environment
 
--- TODO need some logic for checking lean versions agree otherwise we are in a world of hurt
 unsafe
 def summarizeDiffImports (oldImports newImports : Array Import) (old new : SearchPath) : IO Unit := timeit "total" <| do
   searchPathRef.set old
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
-  withImportModules oldImports opts trustLevel fun oldEnv => do
-    -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
-    -- to reduce the need for multiple checkouts, but that seems complicated
-    searchPathRef.set new
-    withImportModules newImports opts trustLevel fun newEnv => do
-      IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
+  -- to work accross versions
+  try
+    withImportModules oldImports opts trustLevel fun oldEnv => do
+      -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
+      -- to reduce the need for multiple checkouts, but that seems complicated
+      searchPathRef.set new
+      withImportModules newImports opts trustLevel fun newEnv => do
+        IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
+  catch e =>
+    if e.toString.drop (e.toString.length - 14) == "invalid header" then
+      throw <| IO.userError r"invalid .olean file header, likely due to a Lean version mismatch
+        you may wish to disable CHECK_OLEAN_VERSION / LEAN_CHECK_OLEAN_VERSION in your Lean build,
+        or manually adjust the Lean version used by Leaff and hope for the best"
+    else
+      throw e
 
 section cmd
 
@@ -698,13 +724,20 @@ elab "diff " "in" ppLine cmd:command : command => do
 
 /-- `diffs in $command` executes a sequence of commands and then prints the
 environment diff -/
-elab "diffs " "in" ppLine cmd:command* ("end diffs")? : command => do
+elab "diffs " ig:"!"? "in" ppLine cmd:command* ("end diffs")? : command => do
   let oldEnv ← getEnv
   try
     for cmd in cmd do
       elabCommand cmd
   finally
     let newEnv ← getEnv
-    logInfo (Diff.summarize <| ← oldEnv.diff newEnv)
+    logInfo (Diff.summarize <| ← oldEnv.diff newEnv ig.isNone)
 
 end cmd
+
+-- diffs ! in
+-- initialize reucibilityAttrs : EnumAttributes ReducibilityStatus ←
+--   registerEnumAttributes
+--     [(`reduible, "reducible", ReducibilityStatus.reducible),
+--      (`semireduible, "semireducible", ReducibilityStatus.semireducible),
+--      (`irreducble, "irreducible", ReducibilityStatus.irreducible)]
