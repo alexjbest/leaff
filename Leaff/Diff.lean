@@ -122,34 +122,45 @@ Note: this declaration also occurs as `shouldIgnore` in the Lean 4 file `test/le
 -- TODO maybe isBlackListed from mathlib instead? or something else that removes mk.inj and sizeOf_spec
 
 open Lean
+
+-- TODO shorten after https://github.com/leanprover/lean4/pull/3058
+deriving instance BEq for ReducibilityHints
+deriving instance BEq for DefinitionVal
+deriving instance BEq for QuotKind
+deriving instance BEq for QuotVal
+deriving instance BEq for InductiveVal
+deriving instance BEq for ConstantInfo
+
+-- TODO simplify binders (a b : Name)
 /--
 A type representing single differences between two environments, limited
 to changes that a user might wish to see.
 -/
 inductive Diff : Type
-  | added (name : Name)
-  | removed (name : Name)
-  | renamed (oldName newName : Name) (namespaceOnly : Bool)
+  | added (const : ConstantInfo) (relevantModule : Name) -- TODO use constantinfo in others too
+  | removed (name : Name) (relevantModule : Name)
+  | renamed (oldName newName : Name) (namespaceOnly : Bool) (relevantModule : Name)
   | movedToModule (name oldModuleName newModuleName : Name) -- maybe args here
-  | proofChanged (name : Name) (isProofRelevant : Bool) -- TODO maybe value changed also for defs
-  | typeChanged (name : Name)
-  | speciesChanged (name : Name) (fro to : String) -- species is axiom, def, thm, opaque, quot, induct, ctor, rec
-  | movedWithinModule (name : Name)
+  | proofChanged (name : Name) (isProofRelevant : Bool) (relevantModule : Name) -- TODO maybe value changed also for defs
+  | typeChanged (name : Name) (relevantModule : Name)
+  | speciesChanged (name : Name) (fro to : String) (relevantModule : Name) -- species is axiom, def, thm, opaque, quot, induct, ctor, rec
+  | movedWithinModule (name : Name) (relevantModule : Name)
   | extensionEntriesModified (ext : Name) -- TODO maybe delete?
-  | docChanged (name : Name) -- TODO how does module/other doc fit in here
-  | docAdded (name : Name)
-  | docRemoved (name : Name)
+  | docChanged (name : Name) (relevantModule : Name) -- TODO how does module/other doc fit in here
+  | docAdded (name : Name) (relevantModule : Name)
+  | docRemoved (name : Name) (relevantModule : Name)
   | moduleAdded (name : Name)
   | moduleRemoved (name : Name)
   | moduleRenamed (oldName newName : Name)
-  | attributeAdded (attrName name : Name)
-  | attributeRemoved (attrName name : Name)
-  | attributeChanged (attrName name : Name)
+  | attributeAdded (attrName name : Name) (relevantModule : Name)
+  | attributeRemoved (attrName name : Name) (relevantModule : Name)
+  | attributeChanged (attrName name : Name) (relevantModule : Name)
   | directImportAdded (module importName : Name) -- these might be pointless
   | directImportRemoved (module importName : Name)
   | transitiveImportAdded (module importName : Name)
   | transitiveImportRemoved (module importName : Name)
-deriving DecidableEq, Repr
+-- deriving DecidableEq, Repr
+deriving BEq
 
 -- what combinations? all pairs?
 -- renamed and proof modified
@@ -164,71 +175,102 @@ namespace Diff
 /-- Priority for displaying diffs, lower numbers are more important and should come first in the output.
 These should all be distinct as it is what we use to group diffs also -/
 def prio : Diff → Nat
-  | .added _ => 80
-  | .removed _ => 90
-  | .renamed _ _ false => 200
-  | .renamed _ _ true => 210
+  | .added _ _ => 80
+  | .removed _ _ => 90
+  | .renamed _ _ false _ => 200
+  | .renamed _ _ true _ => 210
   | .movedToModule _ _ _ => 220
-  | .movedWithinModule _ => 310
-  | .proofChanged _ true => 110 -- if the declaration is proof relevant (i.e. a def) then it is more important
-  | .proofChanged _ _ => 250
-  | .typeChanged _ => 100
-  | .speciesChanged _ _ _ => 140
+  | .movedWithinModule _ _ => 310
+  | .proofChanged _ true _ => 110 -- if the declaration is proof relevant (i.e. a def) then it is more important
+  | .proofChanged _ _ _ => 250
+  | .typeChanged _ _ => 100
+  | .speciesChanged _ _ _ _ => 140
   | .extensionEntriesModified _ => 150
-  | .docChanged _ => 240
-  | .docAdded _ => 230
-  | .docRemoved _ => 160
+  | .docChanged _ _ => 240
+  | .docAdded _ _ => 230
+  | .docRemoved _ _ => 160
   | .moduleAdded _ => 105
   | .moduleRemoved _ => 107
   | .moduleRenamed _ _ => 170
-  | .attributeAdded _ _ => 180
-  | .attributeRemoved _ _ => 190
-  | .attributeChanged _ _ => 260
+  | .attributeAdded _ _ _ => 180
+  | .attributeRemoved _ _ _ => 190
+  | .attributeChanged _ _ _ => 260
   | .directImportAdded _ _ => 195
   | .directImportRemoved _ _ => 270
   | .transitiveImportAdded _ _ => 330
   | .transitiveImportRemoved _ _ => 340
 -- TODO maybe order this in src to make it clearer
 
+def mod : Diff → Name
+  | .added _ m
+  | .removed _ m
+  | .renamed _ _ _ m
+  | .movedWithinModule _ m
+  | .proofChanged _ _ m
+  | .typeChanged _ m
+  | .speciesChanged _ _ _ m
+  | .docChanged _ m
+  | .docAdded _ m
+  | .docRemoved _ m
+  | .moduleAdded m
+  | .moduleRemoved m
+  | .attributeAdded _ _ m
+  | .attributeRemoved _ _ m
+  | .attributeChanged _ _ m => m
+  | .movedToModule _ _ _
+  | .moduleRenamed _ _
+  | .extensionEntriesModified _
+  | .directImportAdded _ _
+  | .directImportRemoved _ _
+  | .transitiveImportAdded _ _
+  | .transitiveImportRemoved _ _ => Name.anonymous
+
 open Std
+
 -- TODO can we make the output richer,
 -- colours (sort of handled by diff format in github)
 -- links / messagedata in the infoview maybe extracted as links somehow
 -- especially for the diffs command
--- TODO group by module name using @@module@@
 open ToFormat in
 def summarize (diffs : List Diff) : MessageData := Id.run do
-  if diffs = [] then return "No differences found."
-  let mut out : MessageData := ("Found differences:" : MessageData).compose Format.line
+  if diffs == [] then return "No differences found."
+  let mut out : MessageData := "Found differences:" ++ Format.line
   let mut diffs := diffs.toArray
   diffs := diffs.qsort (fun a b => a.prio < b.prio)
+  let mut oldmod : Name := Name.anonymous
   for d in diffs do
-    out := out.compose <| match d with
-      | .added name                                     => m!"+ added {Expr.const name []}\n"
-      | .removed name                                   => m!"- removed {name}\n"
-      | .renamed oldName newName true                   => m!"! renamed {oldName} → {newName} (changed namespace)\n"
-      | .renamed oldName newName false                  => m!"! renamed {oldName} → {newName}\n"
-      | .movedToModule name oldModuleName newModuleName => m!"! moved {name} from {oldModuleName} to {newModuleName}\n"
-      | .movedWithinModule name                         => m!"! moved {name} within module\n"
-      | .proofChanged name true                         => m!"! value changed for {name}\n"
-      | .proofChanged name false                        => m!"! proof changed for {name}\n"
-      | .typeChanged name                               => m!"! type changed for {name}\n"
-      | .speciesChanged name fro to                     => m!"! {name} changed from {fro} to {to}\n"
-      | .extensionEntriesModified ext                   => m!"! extension entry modified for {ext}\n"
-      | .docChanged name                                => m!"! doc modified for {name}\n"
-      | .docAdded name                                  => m!"+ doc added to {name}\n"
-      | .docRemoved name                                => m!"- doc removed from {name}\n"
-      | .moduleAdded name                               => m!"+ module added {name}\n"
-      | .moduleRemoved name                             => m!"- module removed {name}\n"
-      | .moduleRenamed oldName newName                  => m!"! module renamed {oldName} → {newName}\n"
-      | .attributeAdded attrName name                   => m!"+ attribute {attrName} added to {name}\n"
-      | .attributeRemoved attrName name                 => m!"- attribute {attrName} removed from {name}\n"
-      | .attributeChanged attrName name                 => m!"! attribute {attrName} changed for {name}\n"
-      | .directImportAdded module importName            => m!"+ direct import {importName} added to {module}\n"
-      | .directImportRemoved module importName          => m!"- direct import {importName} removed from {module}\n"
-      | .transitiveImportAdded module importName        => m!"+ transitive import {importName} added to {module}\n"
-      | .transitiveImportRemoved module importName      => m!"- transitive import {importName} removed from {module}\n"
-  out := out.compose (format s!"{diffs.size} differences")
+    let mod := d.mod
+    if mod != oldmod then
+      oldmod := mod
+      out := out ++ m!"@@ {mod} @@\n"
+    out := out ++ (match d with
+      -- TODO add expr to all of these
+      | .added const _                                  => m!"+ added {Expr.const const.name (const.levelParams.map mkLevelParam)}"
+      | .removed name _                                 => m!"- removed {Expr.const name []}"
+      | .renamed oldName newName true _                 => m!"! renamed {oldName} → {newName} (changed namespace)"
+      | .renamed oldName newName false _                => m!"! renamed {oldName} → {newName}"
+      | .movedToModule name oldModuleName newModuleName => m!"! moved {name} from {oldModuleName} to {newModuleName}"
+      | .movedWithinModule name _                       => m!"! moved {name} within _  ule"
+      | .proofChanged name true _                       => m!"! value changed for {name}"
+      | .proofChanged name false _                      => m!"! proof changed for {name}"
+      | .typeChanged name _                             => m!"! type changed for {name}"
+      | .speciesChanged name fro to _                   => m!"! {name} changed from {fro} to {to}"
+      | .extensionEntriesModified ext                   => m!"! extension entry modified for {ext}"
+      | .docChanged name _                              => m!"! doc _  ified for {name}"
+      | .docAdded name _                                => m!"+ doc added to {name}"
+      | .docRemoved name _                              => m!"- doc removed from {name}"
+      | .moduleAdded name                               => m!"+ module added {name}"
+      | .moduleRemoved name                             => m!"- module removed {name}"
+      | .moduleRenamed oldName newName                  => m!"! module renamed {oldName} → {newName}"
+      | .attributeAdded attrName name _                 => m!"+ attribute {attrName} added to {name}"
+      | .attributeRemoved attrName name _               => m!"- attribute {attrName} removed from {name}"
+      | .attributeChanged attrName name _               => m!"! attribute {attrName} changed for {name}"
+      | .directImportAdded module importName            => m!"+ direct import {importName} added to {module}"
+      | .directImportRemoved module importName          => m!"- direct import {importName} removed from {module}"
+      | .transitiveImportAdded module importName        => m!"+ transitive import {importName} added to {module}"
+      | .transitiveImportRemoved module importName      => m!"- transitive import {importName} removed from {module}")
+      ++ "\n"
+  out := out ++ m!"{diffs.size} differences"
   pure out
 
 end Diff
@@ -303,6 +345,12 @@ deriving instance BEq for DeclarationRanges
 
 open private docStringExt in Lean.findDocString?
 
+-- TODO upstream??
+def moduleName (env : Environment) (n : Name) : Name :=
+match env.getModuleIdxFor? n with
+| some modIdx => env.allImportedModuleNames[modIdx.toNat]!
+| none => env.mainModule
+
 /-- Take the diff between an old and new state of some environment extension,
 at the moment we hardcode the extensions we are interested in, as it is not clear how we can go beyond that. -/
 def diffExtension (old new : Environment)
@@ -330,7 +378,7 @@ def diffExtension (old new : Environment)
       for (a, b) in ns do
         if !a.isInternalDetail then continue
         if os.find? (revRenames.findD a a) != b then
-          out := .movedWithinModule a :: out
+          out := .movedWithinModule a (moduleName new a) :: out
   | `Lean.docStringExt => do -- Note this is `` not `, as docStringExt is actually private
       let os := MapDeclarationExtension.getImportedState docStringExt old
       let ns := MapDeclarationExtension.getImportedState docStringExt new
@@ -338,15 +386,15 @@ def diffExtension (old new : Environment)
         if a.isInternalDetail then
           continue
         if ¬ os.contains (revRenames.findD a a) then
-          out := .docAdded a :: out
+          out := .docAdded a (moduleName new a) :: out
         else
           if os.find! (revRenames.findD a a) != doc then
-            out := .docChanged a :: out
+            out := .docChanged a (moduleName new a) :: out
       for (a, _b) in os do
         if a.isInternalDetail then
           continue
         if ¬ ns.contains (renames.findD a a) then
-          out := .docRemoved (renames.findD a a) :: out
+          out := .docRemoved (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.protectedExt => do
       let os := TagDeclarationExtension.getImportedState protectedExt old
       let ns := TagDeclarationExtension.getImportedState protectedExt new
@@ -354,12 +402,12 @@ def diffExtension (old new : Environment)
         if a.isInternalDetail then
           continue
         if ¬ os.contains (revRenames.findD a a) then
-          out := .attributeAdded `protected a :: out
+          out := .attributeAdded `protected a (moduleName new a) :: out
       for a in os do
         if a.isInternalDetail then
           continue
         if ¬ ns.contains (renames.findD a a) then
-          out := .attributeRemoved `protected (renames.findD a a) :: out
+          out := .attributeRemoved `protected (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.noncomputableExt => do
       let os := TagDeclarationExtension.getImportedState noncomputableExt old
       let ns := TagDeclarationExtension.getImportedState noncomputableExt new
@@ -367,12 +415,12 @@ def diffExtension (old new : Environment)
         if a.isInternalDetail then
           continue
         if ¬ os.contains (revRenames.findD a a) then
-          out := .attributeAdded `noncomputable a :: out
+          out := .attributeAdded `noncomputable a (moduleName new a) :: out
       for a in os do
         if a.isInternalDetail then
           continue
         if ¬ ns.contains (renames.findD a a) then
-          out := .attributeRemoved `noncomputable (renames.findD a a) :: out
+          out := .attributeRemoved `noncomputable (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.Meta.globalInstanceExtension => do -- TODO test this, is this the relevant ext?
       let os := Lean.Meta.globalInstanceExtension.getState old
       let ns := Lean.Meta.globalInstanceExtension.getState new
@@ -380,12 +428,12 @@ def diffExtension (old new : Environment)
         if a.isInternalDetail then
           continue
         if ¬ os.contains (revRenames.findD a a) then
-          out := .attributeAdded `instance a :: out
+          out := .attributeAdded `instance a (moduleName new a) :: out
       for (a, _) in os do
         if a.isInternalDetail then
           continue
         if ¬ ns.contains (renames.findD a a) then
-          out := .attributeRemoved `instance (renames.findD a a) :: out
+          out := .attributeRemoved `instance (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   -- TODO maybe alias
   -- TODO maybe deprecated
   -- TODO maybe implementedBy
@@ -412,12 +460,12 @@ def diffExtension (old new : Environment)
         if a.isInternalDetail then
           continue
         if ¬ os.outParamMap.contains (revRenames.findD a a) then
-          out := .attributeAdded `class a :: out
+          out := .attributeAdded `class a (moduleName new a) :: out
       for (a, _b) in os.outParamMap do
         if a.isInternalDetail then
           continue
         if ¬ ns.outParamMap.contains (renames.findD a a) then
-          out := .attributeRemoved `class (renames.findD a a) :: out
+          out := .attributeRemoved `class (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | _ => pure ()
     -- if newEntries.size ≠ oldEntries.size then
     -- -- m!"-- {ext.name} extension: {(newEntries.size - oldEntries.size : Int)} new entries"
@@ -460,7 +508,7 @@ relevantTraits.foldl (fun h t => mixHash (hash (t.val c e)) h) 13 -- TODO can we
 -- mixHash (hash <| module.val c e) <| mixHash (hash <| species.val c e) <| mixHash (hash <| name.val c e) <| mixHash (type.val c e |>.hash) (value.val c e |>.hash)
 
 /-- the list of trait combinations used below -/
-def traitCombinations : List (List Trait):= [[name],[value],[name, value],[type],[type, value],[name, value, module],[type, value, module],[species],[module]]
+def traitCombinations : List (List Trait) := [[name],[value],[name, value],[type],[type, value],[name, value, module],[type, value, module],[species],[module]]
 def constantDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace new.header.moduleNames
   -- dbg_trace new.header.moduleData[2]!.imports
@@ -520,55 +568,53 @@ def constantDiffs (old new : Environment) : List Diff := Id.run do
       -- dbg_trace a.name
       -- dbg_trace f a new
       -- [name, type, value, species, module] -- TODO check order
+      -- TODO can we make this cleaner
       if let some (bn, _) := hs.find? (f a new) then
         if t == [name] then
-          out := .renamed bn a.name false :: out -- TODO namespace only?
+          out := .renamed bn a.name false (moduleName new a.name) :: out -- TODO namespace only?
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [value] then
-          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [name, value] then
-          out := .renamed bn a.name false :: out -- TODO namespace only?
-          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          out := .renamed bn a.name false (moduleName new a.name) :: out -- TODO namespace only?
+          out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
-        if t == [type] then -- this is very unlikely?
-          out := .typeChanged a.name :: out
+        if t == [type] then -- this is very unlikely, that the type changes but not the value
+          out := .typeChanged a.name (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [type, value] then
-          out := .typeChanged a.name :: out
-          out := .proofChanged a.name false :: out -- TODO check if proof relevant
+          out := .typeChanged a.name (moduleName new a.name) :: out
+          out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           explained := explained.insert (a.name, false) |>.insert (bn, true)
         if t == [name, value, module] then
-          out := .renamed bn a.name false :: out -- TODO namespace only?
-          out := .proofChanged a.name false :: out -- TODO check if proof relevant
-          out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! bn).toNat]!
-            new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
+          out := .renamed bn a.name false (moduleName new a.name) :: out -- TODO namespace only?
+          out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
+          out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [type, value, module] then
-          out := .typeChanged a.name :: out
-          out := .proofChanged a.name false :: out -- TODO check if proof relevant
-          out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! bn).toNat]!
-            new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
+          out := .typeChanged a.name (moduleName new a.name) :: out
+          out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
+          out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [species] then
-          out := .speciesChanged a.name (speciesDescription (new.constants.find! bn)) (speciesDescription a) :: out
+          out := .speciesChanged a.name (speciesDescription (new.constants.find! bn)) (speciesDescription a) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
         if t == [module] then
-          out := .movedToModule a.name old.allImportedModuleNames[(old.const2ModIdx.find! a.name).toNat]!
-            new.allImportedModuleNames[(new.const2ModIdx.find! a.name).toNat]! :: out
+          out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
   for a in afters do
-    if !explained.contains (a.name, false) then out := .added a.name :: out
+    if !explained.contains (a.name, false) then out := .added a (moduleName new a.name) :: out
   for b in befores do
-    if !explained.contains (b.name, true) then out := .removed b.name :: out
+    if !explained.contains (b.name, true) then out := .removed b.name (moduleName old b.name) :: out
   pure out
 
 /-- for debugging purposes -/
@@ -590,10 +636,11 @@ For instance if a decl is removed, then so will all of its attributes. -/
 def minimizeDiffs (diffs : List Diff) : List Diff := Id.run do
   let mut init := diffs
   for diff in init do
-    if let .removed n := diff then
+    if let .removed n _ := diff then
       init := init.filter fun
-        | .docRemoved m => m != n
-        | .attributeRemoved _ m => m != n
+        | .docRemoved m _ => m != n
+        | .attributeRemoved _ m _ => m != n
+        -- TODO more here
         | _ => true
   pure init
 
@@ -601,7 +648,7 @@ def extractRenames (diffs : List Diff) : NameMap Name := Id.run do
   let mut out := mkNameMap Name
   for diff in diffs do
     match diff with
-    | .renamed old new _ => out := out.insert old new
+    | .renamed old new _ _ => out := out.insert old new
     | _ => pure ()
   pure out
 
