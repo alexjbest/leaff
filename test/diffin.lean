@@ -1,6 +1,9 @@
 import Leaff.Diff
 
 diff in
+def fo : Type _ := Type _
+
+diff in
 def foo := 1
 diff in
 theorem foo' : 1 = 1 := rfl
@@ -11,11 +14,21 @@ section
 def asd := 1
 end
 
--- doesn't work right now
+diff in
+/-- ik heb een docstring -/
+def aaa : LE Nat := sorry
+
+diff in
+attribute [instance] aaa
+
+theorem foo'' : 1 + 1 = 2 := rfl
+
+-- TODO doesn't work
+diff in
+attribute [simp] foo''
+
 diff in
 #eval show Lean.MetaM Unit from do Lean.addDocString `foo "hello"
-
-#check foo
 
 diffs in
 def a := 2
