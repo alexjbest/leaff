@@ -700,3 +700,9 @@ Found differences:
 366 differences
 total 9.85s
 ```
+
+Structure
+---------
+
+There are two test directories, both of which are independent Lean projects  that implement a module `Test`, but with slightly different content.
+This can be used to test leaff like so `./runleaff Test.Test test/ test`.
