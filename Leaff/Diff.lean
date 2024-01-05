@@ -17,11 +17,13 @@ import Leaff.HashSet
 We consider diffs coming from 3 different sources
 - Constants (defs, lemmas, axioms, etc)
 - Environment extensions (attributes, docstrings, etc)
-- Imports
+- Imports (direct and transitive)
 
 ## TODO
 - is there a way to include defeq checking in this?
   for example if a type changes but in a defeq way
+- make RFC to core to upgrade hashing algo
+- make core issue for hash of bignums
 
 -/
 open Lean
@@ -33,7 +35,8 @@ match env.getModuleIdxFor? n with
 | none => env.mainModule
 
 /--
-Traits are functions from `ConstantInfo` to some hashable type `α` that when changed,
+Traits are functions from `ConstantInfo` and the environment
+to some hashable type `α` that when changed,
 results in some meaningful difference between two constants.
 For instance the type, name, value of a constant, or whether it is an axiom,
 theorem, or definition. -/
@@ -55,6 +58,8 @@ def Trait.mk' (α : Type) [Hashable α] [ToString α] (val : ConstantInfo → En
   Trait := ⟨α, val, name⟩
 namespace Trait
 def type : Trait := Trait.mk' Expr (fun c _ => c.type)
+instance : Inhabited Trait := ⟨type⟩
+
 def value : Trait := Trait.mk' Expr (fun c _ => c.value!)
 
 def name : Trait := Trait.mk' Name (fun c _ => c.name)
@@ -94,6 +99,7 @@ def hashExcept (t : Trait) : ConstantInfo → Environment → UInt64 :=
 @[specialize 1]
 def hashExceptMany (t : List Trait) : ConstantInfo → Environment → UInt64 :=
   (relevantTraits.filter (!t.contains ·)).foldl (fun h t c e => mixHash (hash (t.val c e)) (h c e)) (fun _ _ => 7) -- TODO 0 or 7...
+
 
 -- #eval List.sublists [1,2,3]
 -- section testing
@@ -274,7 +280,7 @@ def summarize (diffs : List Diff) : MessageData := Id.run do
       | .moduleRenamed oldName newName                  => m!"! module renamed {oldName} → {newName}"
       | .attributeAdded attrName name _                 => m!"+ attribute {attrName} added to {name}"
       | .attributeRemoved attrName name _               => m!"- attribute {attrName} removed from {name}"
-      | .attributeChanged attrName name _               => m!"! attribute {attrName} changed for {name}"
+      | .attributeChanged attrName name _               => m!"! attribute changed to {attrName} or otherwise modified for {name}"
       | .directImportAdded module importName            => m!"+ direct import {importName} added to {module}"
       | .directImportRemoved module importName          => m!"- direct import {importName} removed from {module}"
       | .transitiveImportAdded module importName        => m!"+ transitive import {importName} added to {module}"
@@ -401,7 +407,7 @@ def diffExtension (old new : Environment)
   -- let newEntries := ext.exportEntriesFn newSt
   -- dbg_trace oldEntries.size
   -- dbg_trace newEntries.size
-  dbg_trace ext.name
+  -- dbg_trace ext.name
   let mut out := []
   -- TODO map exts could be way more efficient, we already have sorted arrays of imported entries
   match ext.name with
@@ -428,7 +434,7 @@ def diffExtension (old new : Environment)
           continue
         if ! ns.contains (renames.findD a a) then
           out := .docRemoved (renames.findD a a) (moduleName new (renames.findD a a)) :: out
-  | ``Lean.reducibilityAttrs => do -- Note this is ` not ``, as docStringExt is actually private
+  | ``Lean.reducibilityAttrs => do
       let os := PersistentEnvExtension.getImportedState reducibilityAttrs.ext old
       let ns := PersistentEnvExtension.getImportedState reducibilityAttrs.ext new
       for (a, red) in ns do
@@ -531,21 +537,14 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
   let mut revRenames := mkNameMap Name
   for (o, n) in renames do
     revRenames := revRenames.insert n o
-  -- dbg_trace "exts"
-  -- dbg_trace old.extensions.size
   for ext in ← persistentEnvExtensionsRef.get do
-    -- dbg_trace ext.name
     out := (← diffExtension old new ext renames revRenames ignoreInternal) ++ out
-  -- let oldexts := RBSet.ofList (old.extensions Prod.fst) Name.cmp -- TODO maybe quickCmp
-  -- let newexts := RBSet.ofList (new.constants.map₁.toList.map Prod.fst) Name.cmp -- TODO maybe quickCmp
   pure out
 
+-- TODO consider implementing some of the following
 -- Lean.namespacesExt
--- Lean.protectedExt
 -- Lean.aliasExtension
--- Lean.attributeExtension
--- Lean.classExtension
--- Lean.reducibilityAttrs
+-- Lean.attributeExtension what is this? the list of all attrs, can we leverage somehow
 -- Lean.Compiler.nospecializeAttr
 -- Lean.Compiler.specializeAttr
 -- Lean.externAttr
@@ -553,7 +552,6 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
 -- Lean.neverExtractAttr
 -- Lean.exportAttr
 -- Lean.Compiler.CSimp.ext
--- Lean.noncomputableExt
 -- Lean.Meta.globalInstanceExtension
 -- Lean.structureExt
 -- Lean.matchPatternAttr
@@ -561,8 +559,6 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
 -- Lean.Meta.defaultInstanceExtension
 -- Lean.Meta.coeDeclAttr
 -- Lean.Linter.deprecatedAttr
--- Lean.declRangeExt
--- Lean.docStringExt
 -- Lean.moduleDocExt
 -- Lean.Meta.customEliminatorExt
 -- Lean.Elab.Term.elabWithoutExpectedTypeAttr
@@ -572,15 +568,12 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
 -- Lean.Meta.congrExtension
 -- Std.Tactic.Alias.aliasExt
 
-
-
-
 open Trait
 
--- TODO do we want definition safety her
-
+-- TODO do we want definition safety here
 def diffHash (c : ConstantInfo) (e : Environment) : UInt64 :=
-relevantTraits.foldl (fun h t => mixHash (hash (t.val c e)) h) 13 -- TODO can we get rid of initial value here?
+-- TODO it would be nice if there was a Haskell style foldl1 for this
+relevantTraits.tail.foldl (fun h t => mixHash (hash (t.val c e)) h) (hash <| relevantTraits.head!.val c e)
 -- mixHash (hash <| module.val c e) <| mixHash (hash <| species.val c e) <| mixHash (hash <| name.val c e) <| mixHash (type.val c e |>.hash) (value.val c e |>.hash)
 
 /-- the list of trait combinations used below -/
@@ -690,7 +683,7 @@ def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List
           out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
           continue
-  dbg_trace "final"
+  -- dbg_trace "final"
   for a in afters do
     if !explained.contains (a.name, false) then out := .added a (moduleName new a.name) :: out
   for b in befores do
@@ -748,7 +741,6 @@ def summarizeDiffImports (oldImports newImports : Array Import) (old new : Searc
   searchPathRef.set old
   let opts := Options.empty
   let trustLevel := 1024 -- TODO actually think about this value
-  -- to work accross versions
   try
     withImportModules oldImports opts trustLevel fun oldEnv => do
       -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
@@ -770,6 +762,8 @@ open Lean Elab Command
 
 -- implementation based on whatsnew by Gabriel Ebner
 
+-- TODO add ! variant
+-- TODO make ! variant macro expand
 /-- `diff in $command` executes the command and then prints the
 environment diff -/
 elab "diff " "in" ppLine cmd:command : command => do
@@ -794,6 +788,7 @@ elab "diffs " ig:"!"? "in" ppLine cmd:command* ("end diffs")? : command => do
 end cmd
 
 diffs in
+noncomputable
 def a:=1
-diffs in
-attribute [reducible] a
+-- diffs in
+-- attribute [reducible] a
