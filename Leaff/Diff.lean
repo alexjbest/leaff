@@ -316,7 +316,13 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
   -- dbg_trace new.header.moduleData[2]!.imports
   pure out
 
+namespace PersistentEnvExtension
 
+def getImportedState [Inhabited α] (ext : PersistentEnvExtension (Name × α) (Name × α) (NameMap α)) (env : Environment) : NameMap α :=
+RBMap.fromArray ((ext.getState env).toList.toArray ++ (ext.toEnvExtension.getState env).importedEntries.flatten) Name.quickCmp
+
+-- TODO use mkStateFromImportedEntries maybe?
+end PersistentEnvExtension
 namespace MapDeclarationExtension
 
 def getImportedState [Inhabited α] (ext : MapDeclarationExtension α) (env : Environment) : NameMap α :=
@@ -367,6 +373,13 @@ instance [BEq α] [Hashable α] : ForIn m (SMap α β) (α × β) where
 
 -- TODO upstream
 deriving instance BEq for DeclarationRanges
+deriving instance BEq for ReducibilityStatus
+
+instance : ToString ReducibilityStatus where
+  toString
+    | ReducibilityStatus.reducible => "reducible"
+    | ReducibilityStatus.semireducible => "semireducible"
+    | ReducibilityStatus.irreducible => "irreducible"
 
 open private docStringExt in Lean.findDocString?
 
@@ -388,7 +401,7 @@ def diffExtension (old new : Environment)
   -- let newEntries := ext.exportEntriesFn newSt
   -- dbg_trace oldEntries.size
   -- dbg_trace newEntries.size
-  -- dbg_trace ext.name
+  dbg_trace ext.name
   let mut out := []
   -- TODO map exts could be way more efficient, we already have sorted arrays of imported entries
   match ext.name with
@@ -415,6 +428,23 @@ def diffExtension (old new : Environment)
           continue
         if ! ns.contains (renames.findD a a) then
           out := .docRemoved (renames.findD a a) (moduleName new (renames.findD a a)) :: out
+  | ``Lean.reducibilityAttrs => do -- Note this is ` not ``, as docStringExt is actually private
+      let os := PersistentEnvExtension.getImportedState reducibilityAttrs.ext old
+      let ns := PersistentEnvExtension.getImportedState reducibilityAttrs.ext new
+      for (a, red) in ns do
+        if ignoreInternal && a.isInternalDetail then
+          continue
+        if ! os.contains (revRenames.findD a a) then
+          out := .attributeAdded (toString red) a (moduleName new a) :: out
+        else
+          if os.find! (revRenames.findD a a) != red then
+            -- TODO specify more
+            out := .attributeChanged (toString red) a (moduleName new a) :: out
+      for (a, red) in os do
+        if ignoreInternal && a.isInternalDetail then
+          continue
+        if ! ns.contains (renames.findD a a) then
+          out := .attributeRemoved (toString red) (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.protectedExt => do
       let os := TagDeclarationExtension.getImportedState protectedExt old
       let ns := TagDeclarationExtension.getImportedState protectedExt new
@@ -480,9 +510,6 @@ def diffExtension (old new : Environment)
   | ``Lean.classExtension => do
       let os := classExtension.getState old
       let ns := classExtension.getState new
-      -- for mod in [0:old.header.moduleData.size] do
-        -- (ext.getModuleEntries old mod)
-      -- IO.println (ext.getModuleEntries old mod).size
       for (a, _b) in ns.outParamMap do
         if ignoreInternal && a.isInternalDetail then
           continue
@@ -735,9 +762,7 @@ elab "diffs " ig:"!"? "in" ppLine cmd:command* ("end diffs")? : command => do
 
 end cmd
 
--- diffs ! in
--- initialize reucibilityAttrs : EnumAttributes ReducibilityStatus ←
---   registerEnumAttributes
---     [(`reduible, "reducible", ReducibilityStatus.reducible),
---      (`semireduible, "semireducible", ReducibilityStatus.semireducible),
---      (`irreducble, "irreducible", ReducibilityStatus.irreducible)]
+diffs in
+def a:=1
+diffs in
+attribute [reducible] a
