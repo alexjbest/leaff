@@ -13,11 +13,6 @@ package «leaff» {
   -- add package configuration options here
 }
 
-lean_lib «test» {
-  globs := #[.submodules `test]
-  -- add library configuration options here
-}
-
 lean_lib «Leaff» {
   -- add library configuration options here
 }

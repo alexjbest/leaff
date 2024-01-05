@@ -266,7 +266,7 @@ def summarize (diffs : List Diff) : MessageData := Id.run do
       | .typeChanged name _                             => m!"! type changed for {name}"
       | .speciesChanged name fro to _                   => m!"! {name} changed from {fro} to {to}"
       | .extensionEntriesModified ext                   => m!"! extension entry modified for {ext}"
-      | .docChanged name _                              => m!"! doc _  ified for {name}"
+      | .docChanged name _                              => m!"! doc modified for {name}"
       | .docAdded name _                                => m!"+ doc added to {name}"
       | .docRemoved name _                              => m!"- doc removed from {name}"
       | .moduleAdded name                               => m!"+ module added {name}"
@@ -319,7 +319,7 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
 namespace PersistentEnvExtension
 
 def getImportedState [Inhabited α] (ext : PersistentEnvExtension (Name × α) (Name × α) (NameMap α)) (env : Environment) : NameMap α :=
-RBMap.fromArray ((ext.getState env).toList.toArray ++ (ext.toEnvExtension.getState env).importedEntries.flatten) Name.quickCmp
+RBMap.fromArray (ext.exportEntriesFn (ext.getState env) ++ (ext.toEnvExtension.getState env).importedEntries.flatten) Name.quickCmp
 
 -- TODO use mkStateFromImportedEntries maybe?
 end PersistentEnvExtension
@@ -540,7 +540,38 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
   -- let newexts := RBSet.ofList (new.constants.map₁.toList.map Prod.fst) Name.cmp -- TODO maybe quickCmp
   pure out
 
-  -- #check reducibilityAttrs
+-- Lean.namespacesExt
+-- Lean.protectedExt
+-- Lean.aliasExtension
+-- Lean.attributeExtension
+-- Lean.classExtension
+-- Lean.reducibilityAttrs
+-- Lean.Compiler.nospecializeAttr
+-- Lean.Compiler.specializeAttr
+-- Lean.externAttr
+-- Lean.Compiler.implementedByAttr
+-- Lean.neverExtractAttr
+-- Lean.exportAttr
+-- Lean.Compiler.CSimp.ext
+-- Lean.noncomputableExt
+-- Lean.Meta.globalInstanceExtension
+-- Lean.structureExt
+-- Lean.matchPatternAttr
+-- Lean.Meta.instanceExtension
+-- Lean.Meta.defaultInstanceExtension
+-- Lean.Meta.coeDeclAttr
+-- Lean.Linter.deprecatedAttr
+-- Lean.declRangeExt
+-- Lean.docStringExt
+-- Lean.moduleDocExt
+-- Lean.Meta.customEliminatorExt
+-- Lean.Elab.Term.elabWithoutExpectedTypeAttr
+-- Lean.Elab.Term.elabAsElim
+-- Lean.Meta.recursorAttribute
+-- Lean.Meta.simpExtension
+-- Lean.Meta.congrExtension
+-- Std.Tactic.Alias.aliasExt
+
 
 
 

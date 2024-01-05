@@ -18,6 +18,11 @@ diff in
 /-- ik heb een docstring -/
 def aaa : LE Nat := sorry
 
+structure Foo where
+  x : Nat
+  y : Nat
+diff in
+attribute [class] Foo
 diff in
 attribute [instance] aaa
 

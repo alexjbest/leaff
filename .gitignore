@@ -2,3 +2,11 @@
 /lake-packages/*
 lakefile.olean
 /.lake
+test/build
+test/.lake
+test/lake-packages/*
+test/lakefile.olean
+test2/build
+test2/.lake
+test2/lake-packages/*
+test2/lakefile.olean
