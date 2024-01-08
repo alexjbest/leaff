@@ -1,4 +1,5 @@
 import Lean
+import Std.Lean.PersistentHashSet
 -- import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
@@ -41,9 +42,11 @@ results in some meaningful difference between two constants.
 For instance the type, name, value of a constant, or whether it is an axiom,
 theorem, or definition. -/
 structure Trait :=
+-- the target type, could be a name, expr, string, etc
   α : Type
+-- the value of this constants trait in the given environment
   val : ConstantInfo → Environment → α
-  id : Name
+  id : Name := by exact decl_name%
   [ins : Hashable α]
   [ts : ToString α] -- for debugging
 
@@ -57,12 +60,17 @@ instance {t : Trait} : ToString t.α := t.ts
 def Trait.mk' (α : Type) [Hashable α] [ToString α] (val : ConstantInfo → Environment → α) (name : Name := by exact decl_name%) :
   Trait := ⟨α, val, name⟩
 namespace Trait
+/-- The type of the constant -/
 def type : Trait := Trait.mk' Expr (fun c _ => c.type)
+
 instance : Inhabited Trait := ⟨type⟩
 
+/-- The value of the constant, ie proof -/
 def value : Trait := Trait.mk' Expr (fun c _ => c.value!)
 
+/-- The name of the constant -/
 def name : Trait := Trait.mk' Name (fun c _ => c.name)
+/-- Def, thm, axiom, etc -/
 def species : Trait := Trait.mk' Nat fun c _ => (fun
   | .axiomInfo _ => 1 -- "axiom"
   | .defnInfo _ => 2 -- "def"
@@ -84,10 +92,12 @@ def speciesDescription : ConstantInfo → String
   | .ctorInfo _ => "ctor"
   | .recInfo _ => "rec"
 
+/-- The module the constant is defined in -/
 def module : Trait := Trait.mk' Name (fun c e => moduleName e c.name)
 
 -- TODO add universe vars trait? possibly already covered by type
 -- TODO maybe def safety as a trait?
+-- TODO maybe reducibility hints
 
 def relevantTraits : List Trait := [name, type, value, species, module]
 -- TODO maybe find some way to make absence of some traits imply others
@@ -150,7 +160,7 @@ to changes that a user might wish to see.
 -/
 inductive Diff : Type
   | added (const : ConstantInfo) (relevantModule : Name) -- TODO use constantinfo in others too
-  | removed (name : Name) (relevantModule : Name)
+  | removed (const : ConstantInfo) (relevantModule : Name)
   | renamed (oldName newName : Name) (namespaceOnly : Bool) (relevantModule : Name)
   | movedToModule (name oldModuleName newModuleName : Name) -- maybe args here
   | proofChanged (name : Name) (isProofRelevant : Bool) (relevantModule : Name) -- TODO maybe value changed also for defs
@@ -239,8 +249,12 @@ def mod : Diff → Name
 
 open Std
 
+def mkConstWithLevelParams' (constInfo : ConstantInfo) : Expr :=
+mkConst constInfo.name (constInfo.levelParams.map mkLevelParam)
+
 -- TODO can we make the output richer,
 -- colours (sort of handled by diff format in github)
+-- but could add some widget magic also?
 -- links / messagedata in the infoview maybe extracted as links somehow
 -- especially for the diffs command
 open ToFormat in
@@ -261,8 +275,8 @@ def summarize (diffs : List Diff) : MessageData := Id.run do
     out := out ++ (match d with
       -- TODO add expr to all of these
       -- TODO see if universe printing can be disabled
-      | .added const _                                  => m!"+ added {Expr.const const.name (const.levelParams.map mkLevelParam)}"
-      | .removed name _                                 => m!"- removed {Expr.const name []}"
+      | .added const _                                  => m!"+ added {mkConstWithLevelParams' const}"
+      | .removed const _                                 => m!"- removed {mkConstWithLevelParams' const}"
       | .renamed oldName newName true _                 => m!"! renamed {oldName} → {newName} (changed namespace)"
       | .renamed oldName newName false _                => m!"! renamed {oldName} → {newName}"
       | .movedToModule name oldModuleName newModuleName => m!"! moved {name} from {oldModuleName} to {newModuleName}"
@@ -290,37 +304,6 @@ def summarize (diffs : List Diff) : MessageData := Id.run do
   pure out
 
 end Diff
-
-open Lean Environment
-
-namespace Lean.Environment
-
-open Std
-
-def importDiffs (old new : Environment) : List Diff := Id.run do
-  let mut out : List Diff := []
-  let mut impHeierOld : RBMap Name (List Name) Name.quickCmp := mkRBMap _ _ _ -- TODO can we reuse any lake internals here?
-  let mut impHeierNew : RBMap Name (List Name) Name.quickCmp := mkRBMap _ _ _ -- TODO can we reuse any lake internals here?
-  let mut idx := 0
-  for mod in old.header.moduleNames do
-    impHeierOld := impHeierOld.insert mod (old.header.moduleData[idx]!.imports.map Import.module).toList -- TODO notation for such updates
-    idx := idx + 1
-  idx := 0
-  for mod in new.header.moduleNames do
-    impHeierNew := impHeierNew.insert mod (new.header.moduleData[idx]!.imports.map Import.module).toList -- TODO notation for such updates
-    idx := idx + 1
-
-  for mod in new.header.moduleNames.toList.diff old.header.moduleNames.toList do
-    out := .moduleAdded mod :: out
-  for mod in old.header.moduleNames.toList.diff new.header.moduleNames.toList do
-    out := .moduleRemoved mod :: out
-  for mod in new.header.moduleNames.toList ∩ old.header.moduleNames.toList do
-    for add in (impHeierNew.findD mod []).diff (impHeierOld.findD mod []) do
-      out := .directImportAdded mod add :: out
-    for rem in (impHeierOld.findD mod []).diff (impHeierNew.findD mod []) do
-      out := .directImportRemoved mod rem :: out
-  -- dbg_trace new.header.moduleData[2]!.imports
-  pure out
 
 namespace PersistentEnvExtension
 
@@ -355,8 +338,38 @@ def getImportedState [Inhabited σ] (ext : ScopedEnvExtension α β σ) (env : E
 ext.getState env
 
 end SimpleScopedEnvExtension
-namespace Leaff.Lean.HashMap
 
+open Lean Environment
+
+namespace Lean.Environment
+
+open Std
+
+def importDiffs (old new : Environment) : List Diff := Id.run do
+  let mut out : List Diff := []
+  let mut impHeierOld : RBMap Name (List Name) Name.quickCmp := mkRBMap _ _ _ -- TODO can we reuse any lake internals here?
+  let mut impHeierNew : RBMap Name (List Name) Name.quickCmp := mkRBMap _ _ _ -- TODO can we reuse any lake internals here?
+  let mut idx := 0
+  for mod in old.header.moduleNames do
+    impHeierOld := impHeierOld.insert mod (old.header.moduleData[idx]!.imports.map Import.module).toList -- TODO notation for such updates
+    idx := idx + 1
+  idx := 0
+  for mod in new.header.moduleNames do
+    impHeierNew := impHeierNew.insert mod (new.header.moduleData[idx]!.imports.map Import.module).toList -- TODO notation for such updates
+    idx := idx + 1
+
+  for mod in new.header.moduleNames.toList.diff old.header.moduleNames.toList do
+    out := .moduleAdded mod :: out
+  for mod in old.header.moduleNames.toList.diff new.header.moduleNames.toList do
+    out := .moduleRemoved mod :: out
+  for mod in new.header.moduleNames.toList ∩ old.header.moduleNames.toList do
+    for add in (impHeierNew.findD mod []).diff (impHeierOld.findD mod []) do
+      out := .directImportAdded mod add :: out
+    for rem in (impHeierOld.findD mod []).diff (impHeierNew.findD mod []) do
+      out := .directImportRemoved mod rem :: out
+  -- dbg_trace new.header.moduleData[2]!.imports
+  pure out
+namespace Leaff.Lean.HashMap
 
 variable [BEq α] [Hashable α]
 /-- copied from Std, we copy rather than importing to reduce the std dependency
@@ -371,6 +384,7 @@ instance : ForIn m (HashMap α β) (α × β) where
         | .yield b => acc := b
     return acc
 end Leaff.Lean.HashMap
+
 
 -- TODO upstream
 instance [BEq α] [Hashable α] : ForIn m (SMap α β) (α × β) where
@@ -490,6 +504,19 @@ def diffExtension (old new : Environment)
           continue
         if ! ns.contains (renames.findD a a) then
           out := .attributeRemoved `instance (renames.findD a a) (moduleName new (renames.findD a a)) :: out
+  | ``Lean.Meta.simpExtension =>
+      let os := SimpleScopedEnvExtension.getImportedState Meta.simpExtension old |>.lemmaNames
+      let ns := SimpleScopedEnvExtension.getImportedState Meta.simpExtension new |>.lemmaNames
+      for a in ns do
+        if ignoreInternal && a.key.isInternalDetail then
+          continue
+        if ! os.contains a then --(revRenames.findD a.key a.key) then TODO
+          out := .attributeAdded `simp a.key (moduleName new a.key) :: out
+      for a in os do
+        if ignoreInternal && a.key.isInternalDetail then
+          continue
+        if ! ns.contains a then -- TODO (renames.findD a a) then
+          out := .attributeRemoved `simp (renames.findD a.key a.key) (moduleName new (renames.findD a.key a.key)) :: out
   -- TODO maybe alias
   -- TODO maybe deprecated
   -- TODO maybe implementedBy
@@ -635,8 +662,8 @@ def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List
     -- dbg_trace s!"{t.id}"
     -- dbg_trace s!"{hs.toList}"
     for a in afters do
-      -- if explained.contains (a.name, false) then
-      --   continue
+      if explained.contains (a.name, false) then
+        continue
       -- dbg_trace a.name
       -- dbg_trace f a new
       -- [name, type, value, species, module] -- TODO check order
@@ -645,20 +672,16 @@ def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List
         if t == [name] then
           out := .renamed bn a.name false (moduleName new a.name) :: out -- TODO namespace only?
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
         if t == [value] then
           out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
         if t == [name, value] then
           out := .renamed bn a.name false (moduleName new a.name) :: out -- TODO namespace only?
           out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
         if t == [type] then -- this is very unlikely, that the type changes but not the value
           out := .typeChanged a.name (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
         if t == [type, value] then
           out := .typeChanged a.name (moduleName new a.name) :: out
           out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
@@ -668,26 +691,22 @@ def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List
           out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
         if t == [type, value, module] then
           out := .typeChanged a.name (moduleName new a.name) :: out
           out := .proofChanged a.name false (moduleName new a.name) :: out -- TODO check if proof relevant
           out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
         if t == [species] then
           out := .speciesChanged a.name (speciesDescription (new.constants.find! bn)) (speciesDescription a) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
-        if t == [module] then
+        if t.contains module then -- TODO finish this switch?
           out := .movedToModule a.name (moduleName old bn) (moduleName new a.name) :: out
           explained := explained.insert (a.name, false) |>.insert (bn, true)
-          continue
   -- dbg_trace "final"
   for a in afters do
     if !explained.contains (a.name, false) then out := .added a (moduleName new a.name) :: out
   for b in befores do
-    if !explained.contains (b.name, true) then out := .removed b.name (moduleName old b.name) :: out
+    if !explained.contains (b.name, true) then out := .removed b (moduleName old b.name) :: out
   pure out
 
 /-- for debugging purposes -/
@@ -711,8 +730,8 @@ def minimizeDiffs (diffs : List Diff) : List Diff := Id.run do
   for diff in init do
     if let .removed n _ := diff then
       init := init.filter fun
-        | .docRemoved m _ => m != n
-        | .attributeRemoved _ m _ => m != n
+        | .docRemoved m _ => m != n.name
+        | .attributeRemoved _ m _ => m != n.name
         -- TODO more here
         | _ => true
   pure init
@@ -744,7 +763,7 @@ def summarizeDiffImports (oldImports newImports : Array Import) (old new : Searc
   try
     withImportModules oldImports opts trustLevel fun oldEnv => do
       -- TODO could be really clever here instead of passing search paths around and try and swap the envs in place
-      -- to reduce the need for multiple checkouts, but that seems complicated
+      -- to reduce the need for multiple checkouts, but that seems complicated, and potentially unsafe as mmap is used to load oleans from disk
       searchPathRef.set new
       withImportModules newImports opts trustLevel fun newEnv => do
         IO.println <| ← (Diff.summarize (← oldEnv.diff newEnv)).format
