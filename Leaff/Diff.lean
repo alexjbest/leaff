@@ -25,6 +25,7 @@ We consider diffs coming from 3 different sources
   for example if a type changes but in a defeq way
 - make RFC to core to upgrade hashing algo
 - make core issue for hash of bignums
+- make unit tests
 
 -/
 open Lean
@@ -42,9 +43,9 @@ results in some meaningful difference between two constants.
 For instance the type, name, value of a constant, or whether it is an axiom,
 theorem, or definition. -/
 structure Trait :=
--- the target type, could be a name, expr, string, etc
+  /-- the target type, could be a name, expr, string, etc -/
   α : Type
--- the value of this constants trait in the given environment
+  /-- the value of a constants trait in the given environment -/
   val : ConstantInfo → Environment → α
   id : Name := by exact decl_name%
   [ins : Hashable α]
@@ -100,28 +101,17 @@ def module : Trait := Trait.mk' Name (fun c e => moduleName e c.name)
 -- TODO maybe reducibility hints
 
 def relevantTraits : List Trait := [name, type, value, species, module]
--- TODO maybe find some way to make absence of some traits imply others
 
+-- TODO use diffhash type fold1 to remove initial value
 @[specialize 1]
 def hashExcept (t : Trait) : ConstantInfo → Environment → UInt64 :=
   (relevantTraits.filter (· != t)).foldl (fun h t c e => mixHash (hash (t.val c e)) (h c e)) (fun _ _ => 7) -- TODO 0 or 7...
 
+-- TODO use diffhash type fold1 to remove initial value
 @[specialize 1]
 def hashExceptMany (t : List Trait) : ConstantInfo → Environment → UInt64 :=
   (relevantTraits.filter (!t.contains ·)).foldl (fun h t c e => mixHash (hash (t.val c e)) (h c e)) (fun _ _ => 7) -- TODO 0 or 7...
 
-
--- #eval List.sublists [1,2,3]
--- section testing
--- def aaaa := 1
--- def aaab := 1
--- #eval show MetaM Unit from do
---   let e ← getEnv
---   let n ← e.find? ``aaaa
---   dbg_trace (hashExcept name n)
---   let n ← e.find? ``aaab
---   dbg_trace (hashExcept name n)
--- end testing
 
 end Trait
 
@@ -211,9 +201,9 @@ def prio : Diff → Nat
   | .docChanged _ _ => 240
   | .docAdded _ _ => 230
   | .docRemoved _ _ => 160
-  | .moduleAdded _ => 105
-  | .moduleRemoved _ => 107
-  | .moduleRenamed _ _ => 170
+  | .moduleAdded _ => 10
+  | .moduleRemoved _ => 20
+  | .moduleRenamed _ _ => 30
   | .attributeAdded _ _ _ => 180
   | .attributeRemoved _ _ _ => 190
   | .attributeChanged _ _ _ => 260
@@ -257,6 +247,7 @@ mkConst constInfo.name (constInfo.levelParams.map mkLevelParam)
 -- but could add some widget magic also?
 -- links / messagedata in the infoview maybe extracted as links somehow
 -- especially for the diffs command
+-- could we even have some form of expr diff?
 open ToFormat in
 def summarize (diffs : List Diff) : MessageData := Id.run do
   if diffs == [] then return "No differences found."
@@ -608,14 +599,14 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
 
 open Trait
 
--- TODO do we want definition safety here
 def diffHash (c : ConstantInfo) (e : Environment) : UInt64 :=
 -- TODO it would be nice if there was a Haskell style foldl1 for this
 relevantTraits.tail.foldl (fun h t => mixHash (hash (t.val c e)) h) (hash <| relevantTraits.head!.val c e)
+-- this should essentially reduce to
 -- mixHash (hash <| module.val c e) <| mixHash (hash <| species.val c e) <| mixHash (hash <| name.val c e) <| mixHash (type.val c e |>.hash) (value.val c e |>.hash)
 
 /-- the list of trait combinations used below -/
-def traitCombinations : List (List Trait) := [[name],[value],[name, value],[type],[type, value],[name, value, module],[type, value, module],[species],[module]]
+def traitCombinations : List (List Trait) := [[name],[value],[name, value],[type],[type, value],[module],[name,module],[value,module],[type,module],[name, value, module],[type, value, module],[species]]
 def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List Diff := Id.run do
   -- dbg_trace new.header.moduleNames
   -- dbg_trace new.header.moduleData[2]!.imports
@@ -740,6 +731,8 @@ def _root_.Leaff.printHashes (name : Name) : MetaM Unit := do
 For instance if a decl is removed, then so will all of its attributes. -/
 def minimizeDiffs (diffs : List Diff) : List Diff := Id.run do
   let mut init := diffs
+  -- TODO do this for modules too
+  -- TODO consider if we want to have added constants not display attributes added
   for diff in init do
     if let .removed n _ := diff then
       init := init.filter fun
