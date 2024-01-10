@@ -518,7 +518,6 @@ def diffExtension (old new : Environment)
         if ! ns.contains a then -- TODO (renames.findD a a) then
           out := .attributeRemoved `simp (renames.findD a.key a.key) (moduleName new (renames.findD a.key a.key)) :: out
   -- TODO maybe alias
-  -- TODO maybe deprecated
   -- TODO maybe implementedBy
   -- TODO maybe export?
   -- declrange (maybe as an option)
@@ -540,6 +539,19 @@ def diffExtension (old new : Environment)
       -- for (a, _b) in SimplePersistentEnvExtension.getState docStringExt old do
       --   if ! (SimplePersistentEnvExtension.getState docStringExt new).contains a then
       --     out := .docRemoved a :: out
+  | ``Lean.Linter.deprecatedAttr => do
+      let os := Lean.Linter.deprecatedAttr.ext.getState old
+      let ns := Lean.Linter.deprecatedAttr.ext.getState new
+      for (a, _b) in ns do
+        if ignoreInternal && a.isInternalDetail then
+          continue
+        if ! os.contains (revRenames.findD a a) then
+          out := .attributeAdded `deprecated a (moduleName new a) :: out
+      for (a, _b) in os do
+        if ignoreInternal && a.isInternalDetail then
+          continue
+        if ! ns.contains (renames.findD a a) then
+          out := .attributeRemoved `deprecated (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.classExtension => do
       let os := classExtension.getState old
       let ns := classExtension.getState new
@@ -585,7 +597,6 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
 -- Lean.Meta.instanceExtension
 -- Lean.Meta.defaultInstanceExtension
 -- Lean.Meta.coeDeclAttr
--- Lean.Linter.deprecatedAttr
 -- Lean.moduleDocExt
 -- Lean.Meta.customEliminatorExt
 -- Lean.Elab.Term.elabWithoutExpectedTypeAttr
@@ -615,18 +626,20 @@ def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List
   --   if const.hasValue && ! name.isInternal then (all + 1, ex + 1) else (all + 1, ex)) (0,0) old.constants)
   -- dbg_trace (all, ex)
   --   old.insert ha <| (old.findD ha #[]).push name) (mkRBMap UInt64 (Array Name) Ord.compare) old.constants)
-  -- TODO recompute this for mathlib! using current ignores
-  -- sz is roughly how many non-internal decls we expect, empirically around 1/5th of total
+  -- sz is roughly how many non-internal decls we expect, empirically around 1/4th of total
   -- TODO change if internals included
-  let sz := max (new.constants.size / 5) (old.constants.size / 5)
+  let sz := max (new.constants.size / 4) (old.constants.size / 4)
 
   -- first we make a hashmap of all decls, hashing with `diffHash`, this should cut the space of "interesting" decls down drastically
   -- TODO reconsider internals, how useful are they
+  -- TODO exclude casesOn recOn?
   -- dbg_trace "making hashes"
   let oldhashes := old.constants.fold
     (fun old name const =>
       if const.hasValue && (!ignoreInternal || !name.isInternalDetail) then old.insert name else old)
     (@mkHashSet Name _ ⟨fun n => diffHash (old.constants.find! n) old⟩ sz)
+  -- dbg_trace old.constants.size
+  -- dbg_trace oldhashes.size
   -- dbg_trace "hashes1 made"
   let newhashes := new.constants.fold
     (fun old name const =>
@@ -807,6 +820,7 @@ elab "diffs " ig:"!"? "in" ppLine cmd:command* ("end diffs")? : command => do
 end cmd
 
 diffs in
+@[deprecated]
 noncomputable
 def a:=1
 -- diffs in
