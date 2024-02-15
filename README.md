@@ -10,7 +10,8 @@ and it is at least fast enough to run on the scale of `mathlib`.
 Usage
 -----
 
-The main entrypoint is the script `runleaff.sh` to use it you should check out two copies of your project, one for the old version of the library and one for the new (e.g. with `git worktree add ../old/ some-other-branch`) then navigate to the Leaff directory and run
+The main entrypoint is the script `runleaff.sh` to use it you should check out two copies of your project, one for the old version of the library and one for the new (e.g. with `git worktree add ../old/ some-other-branch`), 
+build both by running `lake build` in the corresponding directories, then navigate to the Leaff directory and run
 ```
 ./runleaff.sh ModuleName /path/to/old-version/ /path/to/new-version/
 ```
