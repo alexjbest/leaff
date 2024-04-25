@@ -1,6 +1,7 @@
 import Lean
 import Std.Lean.PersistentHashSet
 import Std.Lean.Name
+import Std.Tactic.OpenPrivate
 -- import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
