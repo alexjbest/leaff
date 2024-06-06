@@ -1,5 +1,5 @@
 import Lean
-open Lean Meta Elab Std
+open Lean Meta Elab
 
 def Lean.ConstantInfo.hash (c : ConstantInfo) : UInt64 := mixHash c.type.hash c.value!.hash
 

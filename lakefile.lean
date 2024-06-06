@@ -3,7 +3,7 @@ import Lake
 open Lake DSL
 
 require Cli from git "https://github.com/leanprover/lean4-cli.git" @ "main"
-require std from git "https://github.com/leanprover/std4.git" @ "main"
+require batteries from git "https://github.com/leanprover-community/batteries.git" @ "main"
 meta if get_config? mathlib = some "on" then
 require mathlib from git "https://github.com/leanprover-community/mathlib4" @ "30d39f9a058b13ec1786a90af4c051d650762951"
 meta if get_config? mathlib = some "on" then

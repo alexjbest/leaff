@@ -1,7 +1,7 @@
 import Lean.Data.HashSet
-import Std.Data.List.Basic
+import Batteries.Data.List.Basic
 
---TODO consider removing Std dep
+--TODO consider removing Batteries dep
 
 namespace Array
 

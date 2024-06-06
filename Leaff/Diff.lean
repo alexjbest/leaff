@@ -1,11 +1,11 @@
 import Lean
-import Std.Lean.PersistentHashSet
-import Std.Lean.Name
-import Std.Tactic.OpenPrivate
+import Batteries.Lean.PersistentHashSet
+import Batteries.Lean.Name
+import Batteries.Tactic.OpenPrivate
 -- import Leaff.Deriving.Optics
 import Leaff.Hash
 import Leaff.HashSet
--- import Std.Lean.HashMap
+-- import Batteries.Lean.HashMap
 
 
 /-!
@@ -239,7 +239,7 @@ def mod : Diff → Name
   | .attributeChanged _ _ m => m
   | .extensionEntriesModified _ => Name.anonymous
 
-open Std
+open Batteries
 
 def mkConstWithLevelParams' (constInfo : ConstantInfo) : Expr :=
 mkConst constInfo.name (constInfo.levelParams.map mkLevelParam)
@@ -250,7 +250,6 @@ mkConst constInfo.name (constInfo.levelParams.map mkLevelParam)
 -- links / messagedata in the infoview maybe extracted as links somehow
 -- especially for the diffs command
 -- could we even have some form of expr diff?
-open ToFormat in
 def summarize (diffs : List Diff) : MessageData := Id.run do
   if diffs == [] then return "No differences found."
   let mut out : MessageData := "Found differences:" ++ Format.line
@@ -336,7 +335,7 @@ open Lean Environment
 
 namespace Lean.Environment
 
-open Std
+open Batteries
 
 def importDiffs (old new : Environment) : List Diff := Id.run do
   let mut out : List Diff := []
@@ -365,7 +364,7 @@ def importDiffs (old new : Environment) : List Diff := Id.run do
 namespace Leaff.Lean.HashMap
 
 variable [BEq α] [Hashable α]
-/-- copied from Std, we copy rather than importing to reduce the std dependency
+/-- copied from Batteries, we copy rather than importing to reduce the std dependency
 and make changing the Lean version used by Leaff easier (hopefully) -/
 instance : ForIn m (HashMap α β) (α × β) where
   forIn m init f := do
@@ -441,23 +440,24 @@ def diffExtension (old new : Environment)
           continue
         if ! ns.contains (renames.findD a a) then
           out := .docRemoved (renames.findD a a) (moduleName new (renames.findD a a)) :: out
-  | ``Lean.reducibilityAttrs => do
-      let os := PersistentEnvExtension.getImportedState reducibilityAttrs.ext old
-      let ns := PersistentEnvExtension.getImportedState reducibilityAttrs.ext new
-      for (a, red) in ns do
-        if ignoreInternal && a.isInternalDetail then
-          continue
-        if ! os.contains (revRenames.findD a a) then
-          out := .attributeAdded (toString red) a (moduleName new a) :: out
-        else
-          if os.find! (revRenames.findD a a) != red then
-            -- TODO specify more
-            out := .attributeChanged (toString red) a (moduleName new a) :: out
-      for (a, red) in os do
-        if ignoreInternal && a.isInternalDetail then
-          continue
-        if ! ns.contains (renames.findD a a) then
-          out := .attributeRemoved (toString red) (renames.findD a a) (moduleName new (renames.findD a a)) :: out
+  -- TODO fix after https://github.com/leanprover/lean4/commit/47a34316fc03ce936fddd2d3dce44784c5bcdfa9
+  -- | ``Lean.reducibilityAttrs => do
+  --     let os := PersistentEnvExtension.getImportedState reducibilityAttrs.ext old
+  --     let ns := PersistentEnvExtension.getImportedState reducibilityAttrs.ext new
+  --     for (a, red) in ns do
+  --       if ignoreInternal && a.isInternalDetail then
+  --         continue
+  --       if ! os.contains (revRenames.findD a a) then
+  --         out := .attributeAdded (toString red) a (moduleName new a) :: out
+  --       else
+  --         if os.find! (revRenames.findD a a) != red then
+  --           -- TODO specify more
+  --           out := .attributeChanged (toString red) a (moduleName new a) :: out
+  --     for (a, red) in os do
+  --       if ignoreInternal && a.isInternalDetail then
+  --         continue
+  --       if ! ns.contains (renames.findD a a) then
+  --         out := .attributeRemoved (toString red) (renames.findD a a) (moduleName new (renames.findD a a)) :: out
   | ``Lean.protectedExt => do
       let os := TagDeclarationExtension.getImportedState protectedExt old
       let ns := TagDeclarationExtension.getImportedState protectedExt new
@@ -597,7 +597,7 @@ def extDiffs (old new : Environment) (renames : NameMap Name) (ignoreInternal : 
 -- Lean.Meta.recursorAttribute
 -- Lean.Meta.simpExtension
 -- Lean.Meta.congrExtension
--- Std.Tactic.Alias.aliasExt
+-- Batteries.Tactic.Alias.aliasExt
 
 open Trait
 
