@@ -17,6 +17,11 @@ build both by running `lake build` in the corresponding directories, then naviga
 ```
 note that the module name will likely just be the name of the library (e.g. `Mathlib`) if want to know all potential downstream changes of some change, but could be more specific, e.g. `MyLibrary.SomeFile`. The paths could be relative to the Leaff directory or absolute.
 
+E.g. to test from this directory
+```
+./runleaff.sh Test.Test test test2
+```
+
 You may face many issues, especially if the diff is too big, if there are different Lean versions use in the libraries, or if there is a different Lean version used to compile the libraries and Leaff itself.
 
 ```diff

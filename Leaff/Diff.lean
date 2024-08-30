@@ -1,6 +1,5 @@
 import Lean
 import Batteries.Lean.PersistentHashSet
-import Batteries.Lean.Name
 import Batteries.Tactic.OpenPrivate
 -- import Leaff.Deriving.Optics
 import Leaff.Hash
@@ -393,7 +392,7 @@ instance : ToString ReducibilityStatus where
     | ReducibilityStatus.semireducible => "semireducible"
     | ReducibilityStatus.irreducible => "irreducible"
 
-open private docStringExt in Lean.findDocString?
+open private docStringExt in Lean.findSimpleDocString?
 
 /-- Take the diff between an old and new state of some environment extension,
 at the moment we hardcode the extensions we are interested in, as it is not clear how we can go beyond that. -/
@@ -621,7 +620,7 @@ def constantDiffs (old new : Environment) (ignoreInternal : Bool := true) : List
   --   old.insert ha <| (old.findD ha #[]).push name) (mkRBMap UInt64 (Array Name) Ord.compare) old.constants)
   -- sz is roughly how many non-internal decls we expect, empirically around 1/4th of total
   -- TODO change if internals included
-  let sz := max (new.constants.size / 4) (old.constants.size / 4)
+  let sz := max (new.constants.fold (fun x y z => x + 1) 0 / 4) (old.constants.fold (fun x y z => x + 1) 0 / 4)
 
   -- first we make a hashmap of all decls, hashing with `diffHash`, this should cut the space of "interesting" decls down drastically
   -- TODO reconsider internals, how useful are they
@@ -818,5 +817,5 @@ diffs in
 @[deprecated]
 noncomputable
 def a:=1
--- diffs in
--- attribute [reducible] a
+diffs in
+attribute [reducible] a
